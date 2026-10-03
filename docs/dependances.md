@@ -141,17 +141,21 @@ publié ; il demande clang et cmake récents.
 
 ## Après l'installation
 
-### Chemin de redumper pour l'assistant privilégié
+### Dumps sans mot de passe : groupe disc-launcher
 
-L'assistant n'exécute que les chemins listés dans
-`/etc/disc-launcher/helper-tools.toml`. Le fichier fourni cherche
-`/usr/local/bin/redumper` puis `/usr/bin/redumper`, ce qui couvre les deux
-installations ci-dessus. `make install` ne remplace pas un fichier existant :
-si vous l'aviez installé avant la version 0.3.4, mettez la ligne à jour :
+Les lectures brutes passent par l'assistant privilégié (`pkexec`). `sudo make
+install` crée le groupe `disc-launcher` ; ses membres dumpent sans mot de
+passe, les autres utilisateurs doivent s'authentifier (mot de passe
+administrateur, mémorisé quelques minutes) :
 
 ```sh
-sudo sed -i 's|^path = "/usr/bin/redumper"|path = ["/usr/local/bin/redumper", "/usr/bin/redumper"]|' /etc/disc-launcher/helper-tools.toml
+sudo usermod -aG disc-launcher "$USER"   # puis déconnexion et reconnexion
+disc-launcher doctor                     # ligne « groupe »
 ```
+
+L'assistant cherche redumper dans `/usr/local/bin` puis `/usr/bin` (profil
+`redumper-disc`). Installé ailleurs : redéfinissez le profil dans
+`/etc/disc-launcher/helper-tools.toml` (exemple dans le fichier).
 
 ### Accès au lecteur
 
@@ -206,7 +210,7 @@ redumper_args = ["--drive-type=GENERIC", "--drive-read-offset=6", "--drive-c2-sh
 ```
 
 Ces options sont ajoutées à chaque appel de redumper pour ce lecteur ; elles
-figurent dans la liste autorisée de `helper-tools.toml`. La ligne de la base
+font partie des options acceptées par le profil `redumper-disc` de l'assistant. La ligne de la base
 de redumper se lit ainsi : fabricant, modèle, micrologiciel, …, décalage de
 lecture (`+6`), décalage C2 (`0`), début de pré-zone (`-135`), méthode de
 lecture (`BE`), ordre des secteurs (`DATA_C2_SUB`), type (`GENERIC`).

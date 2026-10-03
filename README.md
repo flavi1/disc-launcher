@@ -56,7 +56,7 @@ L'installation dépose :
 | Démon, commande, classificateur | `$(PREFIX)/bin` : `disc-launcherd`, `disc-launcher`, `disc-identify`, `disc-launcher-job` |
 | Gestionnaires génériques | `disc-launcher-generic` (consoles, cartouches), `disc-launcher-media-generic` (médias), `disc-launcher-data-generic` (disques de fichiers) |
 | Gestionnaires et lecteurs facultatifs | `disc-launcher-retroarch`, `disc-launcher-player-kodi`, `disc-launcher-resolve-serials` |
-| Assistant privilégié | `$(PREFIX)/libexec/disc-launcher/disc-launcher-helper` et sa politique polkit |
+| Assistant privilégié | `$(PREFIX)/libexec/disc-launcher/disc-launcher-helper` ; politique et règle polkit (`/usr/share/polkit-1/actions/`, `/etc/polkit-1/rules.d/`) ; groupe `disc-launcher` |
 | Manifestes, signatures, profils de lecteurs | `$(PREFIX)/share/disc-launcher/` |
 | Configuration | `/etc/disc-launcher/config.toml` et `helper-tools.toml` |
 | Démarrage du démon | `/etc/xdg/autostart/disc-launcherd.desktop` (voir « Démarrage du démon ») |
@@ -172,7 +172,7 @@ La [Retrode](https://www.retrode.com/) se branche en USB et présente la cartouc
 
 Avec `[filenameChksum] 1` dans `RETRODE.CFG`, la Retrode ajoute une somme de contrôle au nom du fichier : deux révisions d'un même jeu ont alors des noms différents, ce qui fiabilise le cache des empreintes (la somme est retirée du titre si elle est hexadécimale et séparée par une espace, un tiret ou un souligné).
 
-Les ROM N64 sont ramenées au format `.z64` quel que soit l'ordre d'octets produit (`.n64`, `.v64`) ; l'en-tête de copieur SNES est retiré. Systèmes : `n64`, `snes`, `megadrive`, `gb`, `gbc`, `gba`, `mastersystem`, `gamegear` (dossiers régionaux `sfc` et `genesis` comme ES-DE). Les extensions sont lues dans `RETRODE.CFG`. Les sauvegardes (`.srm`) ne sont pas copiées. `disc-launcher rom info <fichier>` analyse une ROM (en-tête, empreinte, nom) ; sur la Retrode, cela revient à la dumper.
+Les ROM N64 sont ramenées au format `.z64` quel que soit l'ordre d'octets produit (`.n64`, `.v64`) ; l'en-tête de copieur SNES est retiré. Les ROM Mega Drive sont copiées en `.mdx` plutôt qu'en `.md`, pour éviter la confusion avec Markdown (`.md`, `.bin`, `.gen`, `.smd` restent reconnus). Systèmes : `n64`, `snes`, `megadrive`, `gb`, `gbc`, `gba`, `mastersystem`, `gamegear` (dossiers régionaux `sfc` et `genesis` comme ES-DE). Les extensions sont lues dans `RETRODE.CFG`. Les sauvegardes (`.srm`) ne sont pas copiées. `disc-launcher rom info <fichier>` analyse une ROM (en-tête, empreinte, nom) ; sur la Retrode, cela revient à la dumper.
 
 L'émulateur par défaut est RetroArch : Mupen64Plus-Next pour les ROM N64, **Dolphin pour les WAD** (`existing_wad` du manifeste), Snes9x, Genesis Plus GX, Gambatte, mGBA. `[handlers.n64] emulator = "mupen64plus"` ou `program = "…"` en change ; un lanceur qui choisit lui-même l'émulateur (ES-DE…) se branche comme gestionnaire (`[handlers.n64] executable = { play = "…" }`).
 
@@ -241,6 +241,10 @@ Si vous renommez ou déplacez un fichier sous `~/ROMs`, disc-launcher le retrouv
 
 Le chemin réel est alors mis à jour et le nom canonique conservé. La recherche a lieu à l'insertion du disque correspondant, et lors de `disc-launcher collection scan`, qui parcourt tous les fichiers de `~/ROMs`. Le premier scan reste rapide : il ne calcule que les empreintes partielles, sauf avec `--full-hash`.
 
+**Au démarrage du démon**, un scan paresseux tourne en arrière-plan (`[collection] scan_on_start = true`, réglage par défaut) : il indexe les fichiers ajoutés et marque les fichiers supprimés comme absents, sans lire leur contenu. Un fichier supprimé n'est plus proposé, et son nom n'est plus repris : à la réinsertion du disque, le nom est recalculé à partir de la base de référence.
+
+**Noms.** La base de référence passe avant le cache des résolveurs : après un `refdb fetch` ou un `refdb import`, les noms sont recalculés. Seul un nom établi par la base, ou vérifié par empreinte, est repris de l'index ; un nom provisoire (« SLES-02905 (Europe) ») ne l'est jamais.
+
 Les `.cue` ne sont pas indexés : ce sont de petits fichiers texte, trop semblables entre eux pour identifier un jeu. Un jeu cue/bin est indexé par sa première piste, et lancé par le `.cue` qui la référence.
 
 ```text
@@ -303,7 +307,15 @@ La base sert à trois choses :
 
 **Systèmes sans correspondance par taille.** Pour GameCube et Wii, le résolveur `serials` lit `~/.local/share/disc-launcher/serials/<système>.txt`. Le format GameTDB `GALE01 = Titre` et le format TSV sont acceptés.
 
-**Lecture brute.** L'assistant privilégié ne lance que les outils listés dans `/etc/disc-launcher/helper-tools.toml`. Vérifiez-y le chemin de `redumper` (par défaut `/usr/local/bin/redumper`, sinon `/usr/bin/redumper`).
+**Lecture brute et autorisations.** Les lectures qui demandent des commandes constructeur (redumper, friidump) passent par l'assistant privilégié, `pkexec disc-launcher-helper`. Il n'exécute qu'un **profil d'invocation** : la tâche lui transmet le nom du profil (`redumper-disc`, `friidump`), le lecteur, le dossier de sortie, un nom de fichier et des options prévues par le profil, et l'assistant construit lui-même la commande. Les profils sont intégrés ; `/etc/disc-launcher/helper-tools.toml` (appartenant à root) permet d'en redéfinir ou d'en ajouter.
+
+`sudo make install` crée le groupe **`disc-launcher`** et une règle polkit : ses membres dumpent sans mot de passe, les autres doivent s'authentifier (mot de passe administrateur, mémorisé quelques minutes).
+
+```sh
+sudo usermod -aG disc-launcher "$USER"   # puis déconnexion et reconnexion
+```
+
+La politique et la règle sont installées là où polkit les lit, quel que soit `PREFIX` : `/usr/share/polkit-1/actions/` et `/etc/polkit-1/rules.d/50-disc-launcher.rules`.
 
 ## Utilisation
 
@@ -372,37 +384,6 @@ contrib/                    exemples de services systemd, OpenRC, runit, s6
 Le projet n'a aujourd'hui aucune dépendance Rust : crates.io n'était pas accessible pendant l'écriture. Les formats JSON, TOML et XML, le client D-Bus et la liaison SQLite sont donc écrits à la main (`src/json.rs`, `toml.rs`, `xml.rs`, `dbus.rs`, `sqlite.rs`). Ils sont testés et suffisent au projet, mais c'est du code à maintenir, et le lecteur TOML ne couvre qu'un sous-ensemble du format.
 
 À faire : les remplacer par les bibliothèques de référence, `serde` + `serde_json`, `toml`, `quick-xml`, `zbus` et `rusqlite`. Chaque module a une interface étroite ; le remplacement peut se faire module par module. Contrepartie : un temps de compilation plus long et des dépendances à suivre.
-
-### Lectures privilégiées sans mot de passe (polkit)
-
-Les lectures brutes passent par `pkexec disc-launcher-helper`. La politique fournie (`data/polkit/io.github.flavi1.disclauncher.policy`) autorise l'utilisateur de la session active **sans mot de passe** (`allow_active = yes`), pour qu'un dump démarre sans interruption.
-
-Conséquence : n'importe quel programme lancé dans votre session peut aussi appeler l'assistant. Le risque est limité, car l'assistant n'exécute que les outils listés dans `/etc/disc-launcher/helper-tools.toml`, sur un lecteur `/dev/srN`, avec des arguments filtrés, sous votre identité, et n'écrit que dans un dossier qui vous appartient. Mais c'est une porte vers des commandes SCSI constructeur ouverte sans confirmation.
-
-Options à évaluer :
-
-- `auth_admin_keep` : mot de passe demandé au premier dump, puis mémorisé quelques minutes ;
-- une règle polkit (`/etc/polkit-1/rules.d/`) qui n'autorise sans mot de passe que les membres d'un groupe dédié, par exemple `disc-launcher` ;
-- garder `yes` mais le documenter comme un choix de confort.
-
-### Contrôle des arguments de l'assistant
-
-L'assistant tourne avec un privilège (`CAP_SYS_RAWIO`) que l'utilisateur n'a pas d'ordinaire. Il ne doit donc pas exécuter n'importe quelle ligne de commande qu'on lui transmet : sinon, un programme malveillant pourrait lui faire lancer redumper avec des options dangereuses, ou écrire ailleurs que prévu.
-
-Aujourd'hui, la tâche de dump construit la ligne de commande et l'assistant la vérifie **argument par argument**, contre la liste `allowed_args` de `helper-tools.toml` (`disc`, `--drive=`, `--image-path=`, `--speed=`…). C'est fragile dans les deux sens :
-
-- quand redumper ajoute ou renomme une option utile, l'assistant la refuse (« argument non autorisé ») et le dump échoue, tant que la liste n'est pas mise à jour à la main ;
-- une liste longue et permissive finit par laisser passer des combinaisons qu'on n'avait pas prévues.
-
-À faire : remplacer cette liste par des **profils d'invocation complets**, définis uniquement par root dans `helper-tools.toml`, par exemple :
-
-```toml
-[profiles.redumper-disc]
-command = ["/usr/bin/redumper", "disc", "--drive={sgdevice}", "--image-path={out}", "--image-name={name}"]
-variables = { name = "nom-de-fichier", speed = "entier" }
-```
-
-La tâche ne transmettrait plus qu'un nom de profil et quelques valeurs typées (nom de fichier, vitesse). L'assistant construirait lui-même la commande. Rien d'autre ne pourrait être injecté, et une évolution de redumper ne demanderait que de modifier le profil.
 
 ### Lecture UDF interne
 
