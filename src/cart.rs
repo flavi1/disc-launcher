@@ -160,7 +160,7 @@ pub fn target_ext(system: &str) -> &'static str {
     match system {
         "n64" => "z64",
         "snes" => "sfc",
-        "megadrive" => "md",
+        "megadrive" => "mdx", // plutôt que .md (Markdown)
         "gb" => "gb",
         "gbc" => "gbc",
         "gba" => "gba",
