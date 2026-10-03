@@ -1,30 +1,31 @@
-# Outils que l'assistant privilégié peut exécuter (avec CAP_SYS_RAWIO, sous
-# l'identité de l'utilisateur). Fichier lu uniquement depuis
-# /etc/disc-launcher/helper-tools.toml, qui doit appartenir à root et ne pas
-# être modifiable par d'autres.
+# Profils d'invocation de l'assistant privilégié (disc-launcher-helper).
 #
-#   path         : chemin absolu de l'outil (appartenant à root), ou liste de
-#                  chemins dont le premier existant est retenu
-#   allowed_args : arguments acceptés ; une entrée terminée par « = » accepte
-#                  toute valeur (« --speed= » accepte « --speed=8 »)
-#   path_args    : préfixes dont la valeur doit rester dans le dossier de sortie
-#   device_args  : préfixes dont la valeur doit être le périphérique demandé
-#   value_args   : options suivies d'une valeur séparée, de type « device » ou « path »
-
-[tools.redumper]
-path = ["/usr/local/bin/redumper", "/usr/bin/redumper"]
-allowed_args = [
-  "disc", "dump", "dump::extra", "protection", "refine", "split", "info", "hash", "skeleton",
-  "--drive=", "--image-path=", "--image-name=", "--speed=", "--retries=",
-  "--verbose", "--overwrite", "--auto-eject", "--drive-type=", "--drive-read-offset=",
-  "--drive-c2-shift=", "--drive-pregap-start=", "--drive-read-method=", "--drive-sector-order=",
-  "--plextor-skip-leadin", "--asus-skip-leadout", "--disable-cdtext", "--correct-offset-shift",
-]
-path_args = ["--image-path="]
-device_args = ["--drive="]
-
-# Syntaxe Friidump à vérifier selon la version installée.
-[tools.friidump]
-path = ["/usr/local/bin/friidump", "/usr/bin/friidump"]
-allowed_args = ["-a", "-s", "-r"]
-value_args = { "-d" = "device", "-i" = "path" }
+# L'assistant ne lance jamais une ligne de commande transmise telle quelle :
+# la tâche de dump ne lui donne qu'un nom de profil, le lecteur, le dossier de
+# sortie, un nom de fichier et des options prévues par le profil ; il construit
+# lui-même la commande. Ce fichier doit appartenir à root et n'être modifiable
+# par personne d'autre (/etc/disc-launcher/helper-tools.toml).
+#
+# Profils intégrés (rien à écrire ici pour les utiliser) :
+#   redumper-disc  redumper disc --drive={sgdevice} --image-path={out} --image-name={name}
+#   friidump       friidump -d {device} -i {out}/{name}.iso
+#
+# Un profil défini ici remplace entièrement le profil intégré de même nom, ou
+# en ajoute un. Clés :
+#   path     chemin absolu du programme (appartenant à root), ou liste dont le
+#            premier existant est retenu
+#   command  arguments ; gabarits {device} (/dev/srN), {sgdevice} (/dev/sgN du
+#            même lecteur), {out} (dossier de sortie), {name} (nom de fichier)
+#   options  options supplémentaires acceptées (réglages par lecteur, ex.
+#            redumper_args de config.toml) : exactes, ou préfixe terminé par « = »
+#            suivi d'une valeur simple (lettres, chiffres, _ . + -)
+#
+# Exemple : redumper installé ailleurs, avec une option de plus.
+# [profiles.redumper-disc]
+# path = ["/opt/redumper/bin/redumper"]
+# command = ["disc", "--drive={sgdevice}", "--image-path={out}", "--image-name={name}"]
+# options = ["--speed=", "--retries=", "--drive-type=", "--drive-read-offset=",
+#            "--drive-c2-shift=", "--drive-pregap-start=", "--drive-read-method=",
+#            "--drive-sector-order=", "--plextor-skip-leadin", "--asus-skip-leadout",
+#            "--disable-cdtext", "--correct-offset-shift", "--verbose", "--auto-eject",
+#            "--skeleton"]

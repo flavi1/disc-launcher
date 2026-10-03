@@ -30,6 +30,7 @@ profiles = ["omnidrive"]
 name = "read"
 command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
 helper = true
+helper_profile = "redumper-disc"
 progress = "redumper"
 
 [[dump.plan.step]]
@@ -46,6 +47,7 @@ profiles = ["friidump"]
 name = "read"
 command = ["friidump", "-d", "{device}", "-i", "{tmp}/{stem}.iso"]
 helper = true
+helper_profile = "friidump"
 progress = "generic"
 
 [[dump.plan.step]]

@@ -25,6 +25,7 @@ pub mod collection;
 pub mod data;
 pub mod generic;
 pub mod handlers;
+pub mod helper_profiles;
 pub mod jobs;
 pub mod media;
 pub mod naming;

@@ -237,15 +237,19 @@ pub fn dump_plan(m: &Manifest, cfg: &Config, input: &Value) -> Result<Value, Han
         .map(|s| {
             let mut cmd = render_cmd(&s["command"].strings(), &vars);
             // Réglages propres au lecteur (ex. redumper_args pour un modèle inconnu de redumper).
-            if let Some(tool) = cmd.first().map(|c| Path::new(c).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default()) {
-                cmd.extend(cfg.drive_tool_args(&device, &tool));
-            }
+            let tool = cmd.first().map(|c| Path::new(c).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default()).unwrap_or_default();
+            let extra = cfg.drive_tool_args(&device, &tool);
+            cmd.extend(extra.iter().cloned());
             if !cmd.is_empty() && paths::which(&cmd[0]).is_none() {
                 missing.push(cmd[0].clone());
             }
             jobj! {
                 "name" => s["name"].str_or("step"), "command" => cmd,
                 "helper" => s["helper"].bool_or(false), "progress" => s["progress"].str_or("generic"),
+                // Assistant privilégié : profil, nom de fichier et options seulement.
+                "helper_profile" => s["helper_profile"].clone(),
+                "helper_name" => util::render(s["helper_name"].str_or("{stem}"), &vars),
+                "helper_options" => extra,
             }
         })
         .collect();
