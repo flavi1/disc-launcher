@@ -1,0 +1,11 @@
+// disc-launcher : lectures de disque privilégiées (commandes SCSI constructeur,
+// via pkexec disc-launcher-helper) sans mot de passe pour les membres du groupe
+// « disc-launcher ». Les autres utilisateurs doivent s'authentifier
+// (auth_admin_keep, voir io.github.flavi1.disclauncher.policy).
+//
+//   sudo usermod -aG disc-launcher "$USER"    # puis se reconnecter
+polkit.addRule(function(action, subject) {
+    if (action.id == "io.github.flavi1.disclauncher.dump" && subject.isInGroup("disc-launcher")) {
+        return polkit.Result.YES;
+    }
+});

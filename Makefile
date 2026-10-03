@@ -16,6 +16,10 @@ DATADIR     ?= $(PREFIX)/share
 SYSCONFDIR  ?= /etc
 DESTDIR     ?=
 CARGO       ?= cargo
+# polkit ne lit ses actions et ses règles qu'à ces emplacements, quel que soit PREFIX.
+POLKITACTIONSDIR ?= /usr/share/polkit-1/actions
+POLKITRULESDIR   ?= /etc/polkit-1/rules.d
+GROUP       ?= disc-launcher
 TARGET      := target/release
 
 BINS := disc-launcherd disc-launcher disc-identify disc-launcher-job \
@@ -55,9 +59,15 @@ install: built
 	elif ! cmp -s data/helper-tools.toml $$f; then install -m 644 data/helper-tools.toml $$f.dist; \
 	  echo "NOTE : $$f conservé ; nouvelle version fournie dans $$f.dist (comparez avec : diff $$f $$f.dist)"; fi
 	install -m 644 data/desktop/disc-launcherd-autostart.desktop $(DESTDIR)$(SYSCONFDIR)/xdg/autostart/disc-launcherd.desktop
-	install -d $(DESTDIR)$(DATADIR)/applications $(DESTDIR)$(DATADIR)/polkit-1/actions
+	install -d $(DESTDIR)$(DATADIR)/applications $(DESTDIR)$(POLKITACTIONSDIR) $(DESTDIR)$(POLKITRULESDIR)
 	install -m 644 data/desktop/disc-launcher.desktop $(DESTDIR)$(DATADIR)/applications/disc-launcher.desktop
-	sed 's|@LIBEXECDIR@|$(LIBEXECDIR)|' data/polkit/io.github.flavi1.disclauncher.policy > $(DESTDIR)$(DATADIR)/polkit-1/actions/io.github.flavi1.disclauncher.policy
+	sed 's|@LIBEXECDIR@|$(LIBEXECDIR)|' data/polkit/io.github.flavi1.disclauncher.policy > $(DESTDIR)$(POLKITACTIONSDIR)/io.github.flavi1.disclauncher.policy
+	sed 's|"disc-launcher"|"$(GROUP)"|' data/polkit/50-disc-launcher.rules > $(DESTDIR)$(POLKITRULESDIR)/50-disc-launcher.rules
+	rm -f $(DESTDIR)$(DATADIR)/polkit-1/actions/io.github.flavi1.disclauncher.policy
+	@# Groupe des utilisateurs autorisés sans mot de passe (pas lors d'un empaquetage).
+	@if [ -z "$(DESTDIR)" ] && ! getent group $(GROUP) >/dev/null; then \
+	  groupadd --system $(GROUP) && echo "Groupe $(GROUP) créé. Pour dumper sans mot de passe : sudo usermod -aG $(GROUP) \$$USER, puis reconnectez-vous."; \
+	fi
 	install -d $(DESTDIR)$(DATADIR)/doc/disc-launcher/contrib
 	cd contrib && for f in $$(find . -type f); do \
 	  d=$(DESTDIR)$(DATADIR)/doc/disc-launcher/contrib/$$(dirname $$f); install -d $$d; \
@@ -93,6 +103,7 @@ uninstall:
 	rm -f $(DESTDIR)$(DATADIR)/applications/disc-launcher.desktop $(DESTDIR)$(DATADIR)/applications/disc-launcher-play.desktop
 	rm -f $(DESTDIR)$(DATADIR)/solid/actions/disc-launcher-play.desktop
 	rm -f $(DESTDIR)$(DATADIR)/polkit-1/actions/io.github.flavi1.disclauncher.policy
-	@echo "Configuration conservée dans $(SYSCONFDIR)/disc-launcher"
+	rm -f $(DESTDIR)$(POLKITACTIONSDIR)/io.github.flavi1.disclauncher.policy $(DESTDIR)$(POLKITRULESDIR)/50-disc-launcher.rules
+	@echo "Configuration conservée dans $(SYSCONFDIR)/disc-launcher ; groupe $(GROUP) conservé (sudo groupdel $(GROUP))"
 
 .PHONY: all build built test install install-native install-user uninstall

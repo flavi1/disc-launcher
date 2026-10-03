@@ -351,6 +351,18 @@ fn doctor() {
     println!("notifications  : {}", match disclauncher::dbus::Connection::open(disclauncher::dbus::Bus::Session) { Ok(_) => "bus de session joignable", Err(_) => "bus de session injoignable" });
     println!("dialogue       : {}", disclauncher::notify::dialog_tool().unwrap_or("aucun"));
     println!("pkexec         : {}", if paths::which("pkexec").is_some() { "oui" } else { "non" });
+    {
+        // Groupe dispensant du mot de passe pour les lectures privilégiées (règle polkit).
+        let user = std::env::var("USER").unwrap_or_default();
+        let groups = std::fs::read_to_string("/etc/group").unwrap_or_default();
+        let line = groups.lines().find(|l| l.starts_with("disc-launcher:"));
+        let member = line.is_some_and(|l| l.rsplit(':').next().unwrap_or("").split(',').any(|u| u == user));
+        println!("groupe         : {}", match (line, member) {
+            (None, _) => "disc-launcher absent (sudo make install le crée)".to_string(),
+            (Some(_), true) => "membre de disc-launcher (dumps sans mot de passe)".to_string(),
+            (Some(_), false) => format!("non membre de disc-launcher : sudo usermod -aG disc-launcher {user}, puis reconnexion"),
+        });
+    }
     let db = refdb::RefDb::load();
     println!("base Redump    : {} jeux ({})", db.games.len(), refdb::db_path().display());
     println!("\nlecteurs :");
