@@ -34,6 +34,13 @@ terminal = true
 # terminal_command = ["konsole", "--hold", "-e"]
 terminal_command = []
 
+[collection]
+# Au démarrage du démon, parcourir ~/ROMs en arrière-plan, sans lire le
+# contenu des fichiers : fichiers ajoutés indexés, renommages retrouvés,
+# fichiers supprimés marqués absents (leur nom ne sera plus proposé).
+# Empreintes complètes : disc-launcher collection scan --full-hash
+scan_on_start = true
+
 [naming]
 # Renommer vers le nom Redump exact après vérification des empreintes
 rename_after_verify = true

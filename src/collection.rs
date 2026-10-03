@@ -92,6 +92,17 @@ pub struct Collection {
     pub file: PathBuf,
 }
 
+/// Niveau d'empreinte d'un scan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hashing {
+    /// Aucune lecture de contenu (scan d'arrière-plan au démarrage).
+    None,
+    /// Empreinte partielle (taille + premier et dernier Mio).
+    Quick,
+    /// MD5 complet.
+    Full,
+}
+
 pub fn default_path() -> PathBuf {
     paths::user_state_dir().join("collection.db")
 }
@@ -195,7 +206,12 @@ impl Collection {
     /// Enregistre (ou met à jour) un fichier produit ou trouvé. La taille, la
     /// date et l'empreinte partielle sont relues ; le MD5 complet est calculé
     /// s'il n'est pas fourni et que `full_hash` est vrai.
-    pub fn record(&self, mut e: Entry, full_hash: bool) -> Result<(), String> {
+    pub fn record(&self, e: Entry, full_hash: bool) -> Result<(), String> {
+        self.record_with(e, full_hash, true)
+    }
+
+    /// `quick` : calculer l'empreinte partielle si elle manque (faux pour un scan paresseux).
+    pub fn record_with(&self, mut e: Entry, full_hash: bool, quick: bool) -> Result<(), String> {
         let p = index_path_for(Path::new(&e.path));
         e.path = p.to_string_lossy().into_owned();
         if let Some(x) = p.extension() {
@@ -204,7 +220,7 @@ impl Collection {
         let (size, mtime) = file_meta(&p);
         e.size = size;
         e.mtime = mtime;
-        if e.quick_hash.is_none() && p.exists() {
+        if quick && e.quick_hash.is_none() && p.exists() {
             e.quick_hash = util::quick_hash(&p).ok();
         }
         if e.md5.is_none() && full_hash && p.exists() {
@@ -299,6 +315,14 @@ impl Collection {
     /// Les fichiers ajoutés reçoivent toujours l'empreinte partielle (rapide) ;
     /// `full_hash` calcule en plus leur MD5 complet (lent sur une grosse collection).
     pub fn scan(&self, roms: &Path, manifests: &BTreeMap<String, Manifest>, full_hash: bool) -> ScanReport {
+        self.scan_with(roms, manifests, if full_hash { Hashing::Full } else { Hashing::Quick })
+    }
+
+    /// Scan avec le niveau d'empreinte choisi. `Hashing::None` (paresseux) ne lit
+    /// aucun contenu, sauf pour confirmer un renommage (fichiers de même taille
+    /// qu'une entrée disparue).
+    pub fn scan_with(&self, roms: &Path, manifests: &BTreeMap<String, Manifest>, hashing: Hashing) -> ScanReport {
+        let full_hash = hashing == Hashing::Full;
         let mut rep = ScanReport::default();
         let all = self.entries();
         let by_path: BTreeMap<String, Entry> = all.iter().map(|e| (e.path.clone(), e.clone())).collect();
@@ -316,7 +340,7 @@ impl Collection {
             if let Some(e) = by_path.get(&fs) {
                 if e.size != size || e.mtime != mtime {
                     let md5 = if e.size != size { None } else { e.md5.clone() };
-                    let quick = util::quick_hash(&f).ok();
+                    let quick = if hashing == Hashing::None { None } else { util::quick_hash(&f).ok() };
                     let _ = self.db.execute(
                         "UPDATE entries SET size = ?, mtime = ?, md5 = ?, quick_hash = ?, verified = CASE WHEN ? IS NULL THEN NULL ELSE verified END, updated = ? WHERE id = ?",
                         &[Val::Int(size as i64), Val::Int(mtime), md5.clone().into(), quick.into(), md5.into(), Val::Int(util::now_secs()), Val::Int(e.id)],
@@ -345,7 +369,7 @@ impl Collection {
                 continue;
             }
             let stem = f.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            let _ = self.record(
+            let _ = self.record_with(
                 Entry {
                 system: sys_id.clone(),
                 path: fs,
@@ -356,6 +380,7 @@ impl Collection {
                 ..Default::default()
             },
                 full_hash,
+                hashing != Hashing::None,
             );
             rep.added += 1;
         }

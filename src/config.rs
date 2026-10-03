@@ -81,6 +81,9 @@ helper = "auto"
 terminal = true
 terminal_command = []
 
+[collection]
+scan_on_start = true
+
 [naming]
 rename_after_verify = true
 redump_keep_previous = true
@@ -233,6 +236,11 @@ impl Config {
         self.raw.path("general.max_conversions").i64_or(1).clamp(1, 16) as usize
     }
     /// `auto` | `pkexec` | `none`
+    /// Scan paresseux de la collection au démarrage du démon.
+    pub fn scan_on_start(&self) -> bool {
+        self.raw.path("collection.scan_on_start").bool_or(true)
+    }
+
     /// Ouvrir un terminal qui suit chaque tâche de dump.
     pub fn job_terminal(&self) -> bool {
         self.raw.path("general.terminal").bool_or(true)

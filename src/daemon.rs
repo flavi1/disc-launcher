@@ -171,6 +171,22 @@ pub fn run(foreground: bool) -> i32 {
     }
     jobs::prune(30, 100);
 
+    if cfg.scan_on_start() {
+        let roms = cfg.roms_dir();
+        std::thread::Builder::new()
+            .name("scan".into())
+            .spawn(move || {
+                let start = Instant::now();
+                match Collection::open() {
+                    Ok(col) => {
+                        let r = col.scan_with(&roms, &handlers::load_all(), collection::Hashing::None);
+                        dl_log!(info, "collection", "scan de démarrage terminé", "added" => r.added, "updated" => r.updated, "relocated" => r.relocated.len(), "missing" => r.missing, "ms" => start.elapsed().as_millis());
+                    }
+                    Err(e) => dl_log!(warn, "collection", format!("scan de démarrage impossible : {e}")),
+                }
+            })
+            .ok();
+    }
     spawn_event_sources(tx.clone());
     spawn_control_server(tx.clone());
 
@@ -645,6 +661,7 @@ impl Daemon {
         if let Some(t) = &offer.target {
             dl_log!(info, "resolve", "cible prédite", "drive" => dev, "target" => t.path.display(),
                 "confidence" => offer.resolution.as_ref().map(|r| r.confidence.name()).unwrap_or("-"),
+                "source" => offer.resolution.as_ref().map(|r| r.source.as_str()).unwrap_or("-"),
                 "situation" => offer.situation.as_ref().map(|s| s.name()).unwrap_or("-"));
         }
         self.drive(dev).offer = Some(offer.clone());
@@ -1304,6 +1321,7 @@ pub fn start_dump(cfg: &Config, dev: &str, o: &Offer, ident: Option<&IdentResult
     let m = ident.primary().ok_or("aucune étiquette")?;
     let steps_out = if late {
         jobj! {"steps" => vec![jobj!{"name" => "read", "helper" => true, "progress" => "redumper",
+            "helper_profile" => "redumper-disc", "helper_name" => target.stem.clone(), "helper_options" => cfg.drive_tool_args(dev, "redumper"),
             "command" => vec![Value::from("redumper"), Value::from("disc"), Value::from(format!("--drive={}", crate::device::sg_of(dev).unwrap_or_else(|| dev.to_string()))), Value::from(format!("--image-path={}", tmp.display())), Value::from(format!("--image-name={}", target.stem))]}],
             "outputs" => Vec::<Value>::new(), "verify" => Vec::<Value>::new()}
     } else {
