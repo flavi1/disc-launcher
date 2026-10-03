@@ -1,0 +1,4 @@
+#!/bin/execlineb -P
+# Service s6 / s6-rc (longrun) ; variables de session à fournir via s6-envdir.
+fdmove -c 2 1
+/usr/bin/disc-launcherd --foreground

@@ -1,0 +1,11 @@
+# Média « Blu-ray enregistré (BDAV) » (bdav).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.bdav] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-bdav dans le PATH, ou réglez
+# [handlers.bdav] executable = "…".
+
+[handler]
+id = "bdav"
+name = "Blu-ray enregistré (BDAV)"
+kind = "media"
+tags = ["video:bdav"]

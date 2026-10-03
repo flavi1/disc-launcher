@@ -1,0 +1,59 @@
+# Gestionnaire « Sony PlayStation 3 » (ps3).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/ps3.toml (fusion clé par clé).
+
+[handler]
+id = "ps3"
+name = "Sony PlayStation 3"
+kind = "console"
+tags = ["console:ps3"]
+
+
+[formats]
+# Dossier « Jeu.ps3 » contenant PS3_GAME (convention ES-DE).
+target = "ps3"
+target_is_dir = true
+accepted = ["ps3"]
+multidisc = false
+
+[dump]
+requires_profile = ["standard", "omnidrive"]
+# Clé du disque : fichier <série>.dkey ou <nom>.dkey (32 caractères hexadécimaux)
+# dans keys_dir (voir [handlers.ps3] de config.toml).
+requires_key = true
+keys_dir = "~/.local/share/disc-launcher/keys/ps3"
+verify = ["{stem}.iso"]
+outputs = ["{stem}.ps3"]
+
+[[dump.plan]]
+media = ["bd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+# Outils et syntaxes à vérifier selon votre installation.
+[[dump.plan.step]]
+name = "decrypt"
+command = ["ps3dec", "d", "key", "{key}", "{tmp}/{stem}.iso", "{tmp}/{stem}.dec.iso"]
+progress = "generic"
+
+[[dump.plan.step]]
+name = "extract"
+command = ["xorriso", "-osirrox", "on", "-indev", "{tmp}/{stem}.dec.iso", "-extract", "/", "{tmp}/{stem}.ps3"]
+progress = "none"
+
+[resolvers]
+chain = ["redump-local", "serials"]
+
+[emulator]
+default = "rpcs3"
+
+[emulators.rpcs3]
+program = ["rpcs3", "rpcs3.AppImage"]
+existing = ["rpcs3", "--no-gui", "{path}"]
+

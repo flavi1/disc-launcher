@@ -1,0 +1,81 @@
+# Gestionnaire « Panasonic 3DO » (3do).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/3do.toml (fusion clé par clé).
+
+[handler]
+id = "3do"
+name = "Panasonic 3DO"
+kind = "console"
+tags = ["console:3do"]
+
+
+[formats]
+target = "chd"
+accepted = ["chd", "cue", "iso", "m3u"]
+multidisc = true
+
+[dump]
+requires_profile = ["standard", "omnidrive"]
+# Fichiers hachés après la lecture et comparés à la base Redump locale.
+verify = ["{stem}*.bin"]
+# Fichiers du produit final (relatifs au dossier temporaire).
+outputs = ["{stem}.chd"]
+
+[[dump.plan]]
+media = ["cd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["chdman", "createcd", "--force", "-i", "{tmp}/{stem}.cue", "-o", "{tmp}/{stem}.chd"]
+progress = "chdman"
+
+# Repli sans redumper : cdrdao (empaqueté partout). Secteurs complets et pistes
+# audio conservés, mais image non conforme Redump (décalage du lecteur non
+# corrigé, une seule piste .bin) et protections par sous-canal (LibCrypt…) perdues.
+[[dump.plan]]
+name = "cdrdao"
+media = ["cd"]
+exact = false
+verify = []
+
+[[dump.plan.step]]
+name = "read"
+command = ["cdrdao", "read-cd", "--read-raw", "--driver", "generic-mmc-raw", "--device", "{device}", "--datafile", "{stem}.bin", "{stem}.toc"]
+progress = "none"
+
+[[dump.plan.step]]
+name = "cue"
+command = ["toc2cue", "{stem}.toc", "{stem}.cue"]
+progress = "none"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["chdman", "createcd", "--force", "-i", "{tmp}/{stem}.cue", "-o", "{tmp}/{stem}.chd"]
+progress = "chdman"
+
+[convert]
+from = ["cue", "gdi", "iso", "toc"]
+command = ["chdman", "createcd", "--force", "-i", "{input}", "-o", "{output}"]
+
+[verify_cmd]
+chd = ["chdman", "verify", "-i", "{path}"]
+
+[resolvers]
+chain = ["redump-local", "serials"]
+
+[emulator]
+default = "retroarch"
+
+[emulators.retroarch]
+existing = ["retroarch", "-L", "{cores_dir}/opera_libretro.so", "{path}"]
+# Lecture du disque physique par RetroArch (Linux) : à vérifier selon le cœur.
+disc = ["retroarch", "-L", "{cores_dir}/opera_libretro.so", "cdrom://drive{drive_number}.cue"]
+

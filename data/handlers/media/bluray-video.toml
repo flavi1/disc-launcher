@@ -1,0 +1,11 @@
+# Média « Blu-ray vidéo » (bluray-video).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.bluray-video] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-bluray-video dans le PATH, ou réglez
+# [handlers.bluray-video] executable = "…".
+
+[handler]
+id = "bluray-video"
+name = "Blu-ray vidéo"
+kind = "media"
+tags = ["video:bd"]

@@ -1,0 +1,53 @@
+# Gestionnaire « Nintendo 64 » (n64) : cartouches lues par une Retrode.
+# Exécuté par disc-launcher-generic. La cartouche apparaît comme un fichier
+# ROM ({device}) sur le volume RETRODE. Lire ce fichier revient à dumper la
+# cartouche : on ne joue donc jamais depuis la Retrode, on copie (« dump »,
+# normalisé, vérifié par l'empreinte No-Intro) puis on joue la copie.
+# Surcharge partielle : ~/.local/share/disc-launcher/handlers/n64.toml
+
+[handler]
+id = "n64"
+name = "Nintendo 64"
+kind = "console"
+tags = ["console:n64"]
+
+[formats]
+target = "z64"
+accepted = ["z64", "n64", "v64", "wad", "zip", "7z"]
+# Copie existante à jouer en priorité, par extension : un WAD (N64 sur la
+# console virtuelle de la Wii, lancé par Dolphin) passe avant la ROM.
+prefer = ["wad", "z64", "n64", "v64", "zip", "7z"]
+multidisc = false
+
+[dump]
+verify = ["{stem}.z64"]
+outputs = ["{stem}.z64"]
+
+[[dump.plan]]
+name = "copie"
+media = ["cart"]
+
+[[dump.plan.step]]
+name = "copy"
+command = ["disc-launcher", "rom", "copy", "{device}", "{tmp}/{stem}.z64"]
+progress = "none"
+
+[resolvers]
+chain = ["redump-local"]
+
+[emulator]
+default = "retroarch"
+
+[emulators.retroarch]
+existing = ["retroarch", "-L", "{cores_dir}/mupen64plus_next_libretro.so", "{path}"]
+# WAD de console virtuelle Wii : cœur Dolphin
+existing_wad = ["retroarch", "-L", "{cores_dir}/dolphin_libretro.so", "{path}"]
+
+[emulators.mupen64plus]
+existing = ["mupen64plus", "{path}"]
+
+[emulators.dolphin]
+existing = ["dolphin-emu", "-b", "-e", "{path}"]
+
+[emulators.rmg]
+existing = ["RMG", "--fullscreen", "{path}"]

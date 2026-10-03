@@ -1,0 +1,75 @@
+# Gestionnaire « Nintendo Wii » (wii).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/wii.toml (fusion clé par clé).
+
+[handler]
+id = "wii"
+name = "Nintendo Wii"
+kind = "console"
+tags = ["console:wii"]
+
+
+[formats]
+target = "rvz"
+accepted = ["rvz", "iso", "gcz", "wbfs", "ciso", "m3u"]
+multidisc = false
+
+[dump]
+# Lecture impossible sur un lecteur standard.
+requires_profile = ["omnidrive", "friidump"]
+verify = ["{stem}.iso"]
+outputs = ["{stem}.rvz"]
+
+[[dump.plan]]
+media = ["dvd"]
+profiles = ["omnidrive"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["dolphin-tool", "convert", "-i", "{tmp}/{stem}.iso", "-o", "{tmp}/{stem}.rvz", "-f", "rvz", "-b", "131072", "-c", "zstd", "-l", "5"]
+progress = "generic"
+
+[[dump.plan]]
+media = ["dvd"]
+profiles = ["friidump"]
+
+# Ligne de commande Friidump à vérifier selon la version installée.
+[[dump.plan.step]]
+name = "read"
+command = ["friidump", "-d", "{device}", "-i", "{tmp}/{stem}.iso"]
+helper = true
+progress = "generic"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["dolphin-tool", "convert", "-i", "{tmp}/{stem}.iso", "-o", "{tmp}/{stem}.rvz", "-f", "rvz", "-b", "131072", "-c", "zstd", "-l", "5"]
+progress = "generic"
+
+[convert]
+from = ["iso", "gcz", "wbfs", "ciso"]
+command = ["dolphin-tool", "convert", "-i", "{input}", "-o", "{output}", "-f", "rvz", "-b", "131072", "-c", "zstd", "-l", "5"]
+
+[verify_cmd]
+rvz = ["dolphin-tool", "verify", "-i", "{path}"]
+
+[resolvers]
+# « serials » lit ~/.local/share/disc-launcher/serials/{id}.txt (format GameTDB « ID = Titre »).
+chain = ["redump-local", "serials"]
+
+[emulator]
+default = "dolphin"
+
+[emulators.dolphin]
+# Premier programme trouvé dans le PATH ; [handlers.<id>] program = "…" dans
+# config.toml le remplace (AppImage, chemin complet).
+program = ["dolphin-emu", "dolphin"]
+existing = ["dolphin-emu", "-b", "-e", "{path}"]
+

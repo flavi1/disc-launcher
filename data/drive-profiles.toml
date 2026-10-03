@@ -1,0 +1,61 @@
+# Table des lecteurs connus. Liste indicative, à compléter.
+#
+#   vendor / model : identification INQUIRY (modèle comparé par préfixe)
+#   firmware       : préfixe de révision (facultatif)
+#   profile        : profil appliqué automatiquement quand l'entrée correspond
+#   capable        : profil possible après flash (affiché par `disc-launcher doctor`)
+#
+# OmniDrive ne garantit pas une révision de firmware reconnaissable : après
+# avoir flashé un lecteur, déclarez-le dans config.toml :
+#   [drives."/dev/sr0"]
+#   profile = "omnidrive"
+
+# --- Lecteurs Hitachi-LG à puce MediaTek MT1959 (OmniDrive) -----------------
+[[drive]]
+vendor = "HL-DT-ST"
+model = "BD-RE BU40N"
+capable = "omnidrive"
+note = "MT1959, format slim (firmware OmniDrive « BU40N »)"
+
+[[drive]]
+vendor = "HL-DT-ST"
+model = "BD-RE WH16NS60"
+capable = "omnidrive"
+note = "MT1959, format bureau (firmware OmniDrive « BW-16D1HT »)"
+
+[[drive]]
+vendor = "HL-DT-ST"
+model = "BD-RE WH16NS40"
+capable = "omnidrive"
+note = "MT1959 selon la révision matérielle : vérifier la liste OmniDrive"
+
+[[drive]]
+vendor = "HL-DT-ST"
+model = "BD-RE BH16NS40"
+capable = "omnidrive"
+note = "MT1959 selon la révision matérielle : vérifier la liste OmniDrive"
+
+[[drive]]
+vendor = "HL-DT-ST"
+model = "BD-RE BP50NB40"
+capable = "omnidrive"
+note = "MT1959, externe slim : vérifier la liste OmniDrive"
+
+[[drive]]
+vendor = "ASUS"
+model = "BW-16D1HT"
+capable = "omnidrive"
+note = "MT1959, format bureau"
+
+# --- Lecteurs historiques ----------------------------------------------------
+[[drive]]
+vendor = "HL-DT-ST"
+model = "DVD-ROM GDR8164B"
+capable = "friidump"
+note = "Lecteur Hitachi-LG utilisé par Friidump (à vérifier)"
+
+[[drive]]
+vendor = "TSSTcorp"
+model = "CDDVDW SH-D163"
+capable = "kreon"
+note = "Firmware Kreon disponible pour certaines révisions (à vérifier)"

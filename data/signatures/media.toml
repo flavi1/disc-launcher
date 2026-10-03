@@ -1,0 +1,101 @@
+# Signatures des disques audio et vidéo (cible Kodi).
+# Le CD audio (CD-DA, CD-Extra) est reconnu par la table des matières, en code.
+
+[[signature]]
+id = "video-dvd"
+tag = "video:dvd"                # inclut DVD-Audio hybrides et DVD Nuon
+confidence = "certain"
+media = ["dvd"]
+track = "first-data"
+[[signature.match]]
+file = "VIDEO_TS/VIDEO_TS.IFO"
+
+[[signature]]
+id = "dvd-audio"
+tag = "audio:dvd-audio"
+confidence = "certain"
+media = ["dvd"]
+track = "first-data"
+[[signature.match]]
+file = "AUDIO_TS/AUDIO_TS.IFO"
+
+[[signature]]
+id = "video-dvd-vr"
+tag = "video:dvd-vr"
+confidence = "certain"
+media = ["dvd"]
+track = "first-data"
+[[signature.match]]
+file = "DVD_RTAV/VR_MANGR.IFO"
+
+[[signature]]
+id = "video-bd"
+tag = "video:bd"
+confidence = "certain"
+media = ["bd"]
+track = "first-data"
+[[signature.match]]
+file = "BDMV/index.bdmv"
+
+[[signature]]
+id = "video-bdav"
+tag = "video:bdav"
+confidence = "certain"
+media = ["bd"]
+track = "first-data"
+[[signature.match]]
+dir = "BDAV"
+
+[[signature]]
+id = "video-avchd"
+tag = "video:avchd"
+confidence = "certain"
+media = ["dvd", "bd"]
+track = "first-data"
+[[signature.match]]
+dir = "PRIVATE/AVCHD/BDMV"
+
+[[signature]]
+id = "video-hddvd"
+tag = "video:hddvd"
+confidence = "certain"
+media = ["hddvd", "dvd"]
+track = "first-data"
+[[signature.match]]
+dir = "HVDVD_TS"
+
+[[signature]]
+id = "video-vcd"
+tag = "video:vcd"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+dir = "MPEGAV"
+
+[[signature]]
+id = "video-svcd"
+tag = "video:svcd"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+dir = "MPEG2"
+
+[[signature]]
+id = "photo-cd"
+tag = "photo:cd"                 # aucune action par défaut (politique « ignore »)
+confidence = "strong"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+file = "PHOTO_CD/INFO.PCD"
+
+[[signature]]
+id = "photo-dcim"
+tag = "photo:dcim"               # photos d'appareil numérique (norme DCF)
+confidence = "strong"
+media = ["cd", "dvd", "bd"]
+track = "first-data"
+[[signature.match]]
+dir = "DCIM"

@@ -1,0 +1,11 @@
+# Média « DVD vidéo » (dvd-video).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.dvd-video] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-dvd-video dans le PATH, ou réglez
+# [handlers.dvd-video] executable = "…".
+
+[handler]
+id = "dvd-video"
+name = "DVD vidéo"
+kind = "media"
+tags = ["video:dvd"]

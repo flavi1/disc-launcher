@@ -1,0 +1,9 @@
+# Disque de données ne contenant que de la vidéo (MKV, AVI/DivX, MP4…),
+# sous-titres et fichiers d'information mis à part.
+# Lu par disc-launcher-data-generic (clé « data-video » de chaque lecteur).
+
+[handler]
+id = "data-video"
+name = "Disque vidéo (fichiers)"
+kind = "data"
+tags = ["data:video"]

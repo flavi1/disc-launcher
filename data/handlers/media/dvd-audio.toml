@@ -1,0 +1,11 @@
+# Média « DVD-Audio » (dvd-audio).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.dvd-audio] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-dvd-audio dans le PATH, ou réglez
+# [handlers.dvd-audio] executable = "…".
+
+[handler]
+id = "dvd-audio"
+name = "DVD-Audio"
+kind = "media"
+tags = ["audio:dvd-audio"]

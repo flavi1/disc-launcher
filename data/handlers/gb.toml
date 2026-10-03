@@ -1,0 +1,39 @@
+# Gestionnaire « Nintendo Game Boy » (gb) : cartouches lues par une Retrode.
+# Exécuté par disc-launcher-generic. La cartouche apparaît comme un fichier
+# ROM ({device}) sur le volume RETRODE. Lire ce fichier revient à dumper la
+# cartouche : on ne joue donc jamais depuis la Retrode, on copie (« dump »,
+# normalisé, vérifié par l'empreinte No-Intro) puis on joue la copie.
+# Surcharge partielle : ~/.local/share/disc-launcher/handlers/gb.toml
+
+[handler]
+id = "gb"
+name = "Nintendo Game Boy"
+kind = "console"
+tags = ["console:gb"]
+
+[formats]
+target = "gb"
+accepted = ["gb", "zip", "7z"]
+multidisc = false
+
+[dump]
+verify = ["{stem}.gb"]
+outputs = ["{stem}.gb"]
+
+[[dump.plan]]
+name = "copie"
+media = ["cart"]
+
+[[dump.plan.step]]
+name = "copy"
+command = ["disc-launcher", "rom", "copy", "{device}", "{tmp}/{stem}.gb"]
+progress = "none"
+
+[resolvers]
+chain = ["redump-local"]
+
+[emulator]
+default = "retroarch"
+
+[emulators.retroarch]
+existing = ["retroarch", "-L", "{cores_dir}/gambatte_libretro.so", "{path}"]

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=disc-launcher
+Comment=Propose une action à l'insertion d'un disque optique
+Comment[en]=Offers an action when an optical disc is inserted
+Exec=disc-launcherd
+Icon=media-optical
+NoDisplay=true
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-phase=2

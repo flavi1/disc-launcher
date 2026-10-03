@@ -1,0 +1,16 @@
+#!/sbin/openrc-run
+# Service utilisateur OpenRC (OpenRC >= 0.60) : /etc/user/init.d/disc-launcherd
+# rc-update --user add disc-launcherd default
+
+description="disc-launcher : actions à l'insertion d'un disque optique"
+command="/usr/bin/disc-launcherd"
+command_args="--foreground"
+command_background=true
+pidfile="${XDG_RUNTIME_DIR}/disc-launcher/openrc.pid"
+extra_started_commands="reload"
+
+reload() {
+	ebegin "Rechargement de la configuration"
+	start-stop-daemon --signal HUP --pidfile "${pidfile}"
+	eend $?
+}

@@ -1,0 +1,60 @@
+# Gestionnaire « Sega Dreamcast » (dreamcast).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/dreamcast.toml (fusion clé par clé).
+
+[handler]
+id = "dreamcast"
+name = "Sega Dreamcast"
+kind = "console"
+tags = ["console:dreamcast"]
+
+
+[formats]
+target = "chd"
+accepted = ["chd", "cue", "gdi", "cdi", "m3u"]
+multidisc = true
+
+[dump]
+# GD-ROM : la zone haute densité n'est lisible que si le lecteur l'expose.
+# Les MIL-CD et CD-R se dumpent normalement.
+requires_profile = ["standard", "omnidrive"]
+# Fichiers hachés après la lecture et comparés à la base Redump locale.
+verify = ["{stem}*.bin"]
+# Fichiers du produit final (relatifs au dossier temporaire).
+outputs = ["{stem}.chd"]
+
+[[dump.plan]]
+media = ["cd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["chdman", "createcd", "--force", "-i", "{tmp}/{stem}.cue", "-o", "{tmp}/{stem}.chd"]
+progress = "chdman"
+
+[convert]
+from = ["cue", "gdi", "iso", "toc"]
+command = ["chdman", "createcd", "--force", "-i", "{input}", "-o", "{output}"]
+
+[verify_cmd]
+chd = ["chdman", "verify", "-i", "{path}"]
+
+[resolvers]
+chain = ["redump-local", "serials"]
+
+[emulator]
+default = "flycast"
+
+[emulators.flycast]
+existing = ["flycast", "{path}"]
+
+[emulators.retroarch]
+existing = ["retroarch", "-L", "{cores_dir}/flycast_libretro.so", "{path}"]
+

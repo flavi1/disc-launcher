@@ -1,0 +1,197 @@
+# Configuration de disc-launcher.
+#
+# Fichier système : /etc/disc-launcher/config.toml
+# Fichier utilisateur (prioritaire, fusion clé par clé) : ~/.config/disc-launcher/config.toml
+# Les valeurs ci-dessous sont les valeurs par défaut.
+
+[general]
+# daemon : le démon gère tout (recommandé)
+# hybride : coquilles natives Solid/GIO pour Kodi, le démon pour le reste
+# natif-seul : pas de démon (Kodi uniquement, par les coquilles natives)
+mode = "daemon"
+# Vide : réglage « ROMDirectory » d'ES-DE s'il existe, sinon ~/ROMs
+roms_dir = ""
+# Dossiers régionaux d'ES-DE (megacdjp, saturnjp, segacd, tg-cd, neogeocdjp)
+regional_dirs = true
+# Noms compatibles exFAT/FAT/SMB (remplace < > : " \ | ? *)
+portable_names = true
+# Jeux multi-disques : m3u-dir (dossier « Jeu.m3u/ » d'ES-DE) | flat-m3u | flat
+multidisc_layout = "m3u-dir"
+# Proposer une action pour un disque déjà présent à l'ouverture de session
+notify_on_startup = false
+# Éjecter dès la fin de la lecture (la conversion continue)
+eject_after_read = true
+max_conversions = 1
+# Assistant privilégié pour les commandes SCSI constructeur :
+# auto (pkexec si disponible) | pkexec (obligatoire) | none (jamais)
+helper = "auto"
+# Ouvrir un terminal qui affiche le déroulement de chaque dump (sortie de
+# redumper, chdman…). Fermer le terminal n'interrompt pas le dump.
+terminal = true
+# Terminal à utiliser, avec l'option qui précède la commande. Vide : détection
+# (xdg-terminal-exec, terminal par défaut du bureau, $TERMINAL,
+# x-terminal-emulator, puis konsole, gnome-terminal, xfce4-terminal…).
+# terminal_command = ["konsole", "--hold", "-e"]
+terminal_command = []
+
+[naming]
+# Renommer vers le nom Redump exact après vérification des empreintes
+rename_after_verify = true
+# Re-dump : conserver l'ancien fichier en <nom>.bak-<date>
+redump_keep_previous = true
+# Dossier des DAT Redump importés par « disc-launcher refdb import »
+reference_dats = "~/.local/share/disc-launcher/dat/"
+
+[online]
+# Bases de données en ligne : désactivées par défaut, activables source par source
+enabled = false
+sources = []
+timeout = 5
+cache_days = 90
+
+[policy]
+# ask | auto-play | auto-dump | dump-then-play | ignore
+# Clé = identifiant de console (psx, gc…) ou de média (cdda, dvd-video…).
+# « media » s'applique à tous les médias sans réglage propre.
+default = "ask"
+dos = "ignore"
+windows = "ignore"
+photo-cd = "ignore"
+# media = "auto-play"
+# psx = "dump-then-play"
+
+# Profil d'un lecteur : auto | standard | omnidrive | kreon | friidump
+# [drives."/dev/sr0"]
+# profile = "omnidrive"
+# Options ajoutées à redumper pour ce lecteur (modèle absent de sa base,
+# voir docs/dependances.md) :
+# redumper_args = ["--drive-pregap-start=-135"]
+
+# --------------------------------------------------------------------------
+# Gestionnaires
+#
+# Pour chaque verbe (describe, play, dump-plan, convert-plan), l'exécutable est
+# choisi dans cet ordre :
+#   1. [handlers.<id>] executable = "…"  (ou une table par verbe)
+#   2. [handler] executable du manifeste
+#   3. un exécutable disc-launcher-<id> (console) ou disc-launcher-media-<id>
+#      (média) trouvé dans le PATH
+#   4. [handlers.defaults] console / media ci-dessous
+#   5. disc-launcher-generic / disc-launcher-media-generic
+# Une valeur peut être une chaîne (tous les verbes) ou une table par verbe :
+#   console = { play = "disc-launcher-retroarch", "*" = "disc-launcher-generic" }
+
+[handlers.defaults]
+console = "disc-launcher-generic"
+media = "disc-launcher-media-generic"
+data = "disc-launcher-data-generic"     # disques de musique ou de vidéo en fichiers
+
+# Exemples par système :
+# [handlers.psx]
+# program = "~/.local/bin/duckstation"   # programme de l'émulateur (AppImage, chemin…)
+# emulator = "retroarch"            # émulateur du manifeste (générique)
+# name_template = "{name}"          # {name} {title} {region} {disc} {serial} {revision}
+# executable = { play = "~/bin/mon-lanceur-psx" }
+#
+# [handlers.ps3]
+# keys_dir = "~/.local/share/disc-launcher/keys/ps3"
+#
+# [handlers.windows]
+# allow_heuristic = true
+
+# --------------------------------------------------------------------------
+# Médias (CD audio, DVD/Blu-ray vidéo…) : lecteurs de disc-launcher-media-generic
+#
+# Commande par lecteur : clé du média (cdda, dvd-video, bluray-video, dvd-audio,
+# vcd, svcd, hddvd-video, avchd, dvd-vr, bdav, photo-cd, dcim, data-audio,
+# data-video), sinon « default », sinon « command ». Gabarits : {device}
+# {devname} {mount} et toute variable DL_* en minuscules ({label}, {title},
+# {media}…) ; {dcim} (dossier DCIM) pour dcim ; {playlist} (liste M3U des
+# fichiers), {first}, {count} pour data-audio et data-video. Une commande dont
+# une variable est vide (ex. {mount} sans montage) est ignorée.
+
+[media]
+player = "auto"                     # ou un nom de lecteur
+auto_order = ["kodi", "mpv", "vlc", "images"] # premier lecteur installé
+
+# Choix par média :
+# [handlers.cdda]
+# player = "mpv"
+
+# Photos (DCIM) : visionneuse du bureau par défaut (« kodi » pour un diaporama Kodi)
+[handlers.dcim]
+player = "images"
+
+[media.players.kodi]
+name = "Kodi"
+command = ["disc-launcher-player-kodi"]
+# Fichiers et photos : ouverts dans Kodi (JSON-RPC Player.Open)
+data-audio = ["disc-launcher-player-kodi", "--open", "{playlist}"]
+data-video = ["disc-launcher-player-kodi", "--open", "{playlist}"]
+dcim = ["disc-launcher-player-kodi", "--open", "{dcim}"]
+requires = "kodi"                   # présence testée
+# Réglages propres au lecteur Kodi :
+kodi_command = ["kodi"]             # Flatpak : ["flatpak", "run", "tv.kodi.Kodi"]
+host = "127.0.0.1"
+tcp_port = 9090                     # JSON-RPC (contrôle par des applications locales)
+http_port = 8080                    # JSON-RPC HTTP, si le TCP échoue
+http_user = "kodi"
+http_password = ""
+eventserver_port = 9777
+addon_id = "script.disc.import"     # déclenché par RunScript(...)
+addon_params = []                   # ex. ["device={device}"] → sys.argv de l'addon
+startup = "addon-detects"           # Kodi arrêté : l'addon détecte le disque ; ou "rpc"
+startup_timeout = 60
+
+[media.players.mpv]
+name = "mpv"
+cdda = ["mpv", "--force-window", "cdda://", "--cdrom-device={device}"]
+dvd-video = ["mpv", "dvd://", "--dvd-device={device}"]
+bluray-video = ["mpv", "bd://", "--bluray-device={device}"]
+data-audio = ["mpv", "--force-window", "--playlist={playlist}"]
+data-video = ["mpv", "--fullscreen", "--playlist={playlist}"]
+default = ["mpv", "{mount}"]
+
+[media.players.vlc]
+name = "VLC"
+cdda = ["vlc", "cdda://{device}"]
+dvd-video = ["vlc", "dvd://{device}"]
+bluray-video = ["vlc", "bluray://{device}"]
+vcd = ["vlc", "vcd://{device}"]
+svcd = ["vlc", "vcd://{device}"]
+data-audio = ["vlc", "{playlist}"]
+data-video = ["vlc", "--fullscreen", "{playlist}"]
+default = ["vlc", "{mount}"]
+
+[media.players.images]
+name = "Visionneuse d'images"
+dcim = ["xdg-open", "{dcim}"]        # ex. ["gwenview", "{dcim}"]
+requires = "xdg-open"
+
+# --------------------------------------------------------------------------
+# RetroArch (gestionnaire disc-launcher-retroarch, facultatif)
+
+[retroarch]
+command = ["retroarch"]             # Flatpak : ["flatpak", "run", "org.libretro.RetroArch"]
+# cores_dir = "~/.config/retroarch/cores"
+# info_dir = "/usr/share/libretro/info"
+# [retroarch.cores]
+# psx = "mednafen_psx_hw"
+
+# --------------------------------------------------------------------------
+# Crochets
+
+[hooks]
+# Commande lancée après chaque dump, re-dump ou conversion réussis (vide :
+# aucune). Par système : [handlers.<id>] on_dumped = [...] (prioritaire).
+# Gabarits : {path} {system} {name} {folder} {verified} {roms_dir}.
+# Variables : DL_DUMPED_PATH, DL_VERIFIED, DL_SYSTEM, DL_NAME, DL_KEY, DL_JOB…
+# Exemple : on_dumped = ["~/bin/apres-dump.sh", "{path}"]
+on_dumped = []
+timeout = 600       # secondes ; au-delà le crochet est interrompu
+
+[log]
+level = "info"        # error | warn | info | debug | trace
+syslog = false        # copie vers /dev/log (journald, rsyslog, syslog-ng, busybox)
+max_size_mb = 5
+max_files = 5

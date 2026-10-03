@@ -1,0 +1,48 @@
+# Gestionnaire « Microsoft Xbox » (xbox).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/xbox.toml (fusion clé par clé).
+
+[handler]
+id = "xbox"
+name = "Microsoft Xbox"
+kind = "console"
+tags = ["console:xbox"]
+
+
+[formats]
+target = "iso"
+accepted = ["iso", "xiso"]
+multidisc = false
+
+[dump]
+requires_profile = ["omnidrive", "kreon"]
+verify = ["{stem}.iso"]
+# Image redimensionnée (XISO) écrite par extract-xiso dans un sous-dossier.
+outputs = ["xiso/{stem}.iso"]
+
+[[dump.plan]]
+media = ["dvd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+[[dump.plan.step]]
+name = "xiso"
+command = ["extract-xiso", "-r", "-d", "{tmp}/xiso", "{tmp}/{stem}.iso"]
+progress = "none"
+
+[resolvers]
+chain = ["redump-local", "serials"]
+
+[emulator]
+default = "xemu"
+
+[emulators.xemu]
+program = ["xemu", "xemu.AppImage"]
+existing = ["xemu", "-dvd_path", "{path}"]
+

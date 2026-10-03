@@ -1,0 +1,32 @@
+# Gestionnaire « Nintendo Wii U » (wiiu).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/wiiu.toml (fusion clé par clé).
+
+[handler]
+id = "wiiu"
+name = "Nintendo Wii U"
+kind = "console"
+tags = ["console:wiiu"]
+
+
+[formats]
+target = "wua"
+accepted = ["wua", "wud", "wux", "rpx"]
+multidisc = false
+
+[dump]
+# Lisible avec OmniDrive mais chiffré : aucun plan de dump exploitable fourni.
+requires_profile = ["omnidrive"]
+
+[resolvers]
+chain = ["redump-local", "serials"]
+
+[emulator]
+default = "cemu"
+
+[emulators.cemu]
+program = ["cemu", "Cemu", "Cemu.AppImage"]
+existing = ["cemu", "-g", "{path}"]
+

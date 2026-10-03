@@ -1,0 +1,11 @@
+# Média « Super Video CD » (svcd).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.svcd] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-svcd dans le PATH, ou réglez
+# [handlers.svcd] executable = "…".
+
+[handler]
+id = "svcd"
+name = "Super Video CD"
+kind = "media"
+tags = ["video:svcd"]

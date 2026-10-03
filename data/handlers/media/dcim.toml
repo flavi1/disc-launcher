@@ -1,0 +1,9 @@
+# Disque de photos d'appareil numérique (dossier DCIM, norme DCF), gravé sur
+# CD, DVD ou Blu-ray. Lu par disc-launcher-media-generic : le gabarit {dcim}
+# désigne le dossier DCIM du disque monté (monté par udisks2 au besoin).
+
+[handler]
+id = "dcim"
+name = "Photos (DCIM)"
+kind = "media"
+tags = ["photo:dcim"]

@@ -1,0 +1,11 @@
+# Coquille native GNOME, Cinnamon, MATE, Budgie (mode « hybride ») :
+# proposée dans « Ouvrir avec… » et dans les préférences « Supports amovibles ».
+[Desktop Entry]
+Type=Application
+Name=Lire le disque (disc-launcher)
+Name[en]=Play disc (disc-launcher)
+Icon=media-optical
+Exec=disc-launcher run play-disc %u
+MimeType=x-content/audio-cdda;x-content/video-dvd;x-content/video-bluray;x-content/audio-dvd;x-content/video-vcd;x-content/video-svcd;
+NoDisplay=true
+Terminal=false

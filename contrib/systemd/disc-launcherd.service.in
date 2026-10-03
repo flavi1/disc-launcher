@@ -1,0 +1,20 @@
+# Exemple de service utilisateur systemd (non pris en charge officiellement).
+# Voir contrib/README.md. @BINDIR@ est remplacé dans la copie installée sous
+# $(PREFIX)/share/doc/disc-launcher/contrib/.
+[Unit]
+Description=disc-launcher : actions à l'insertion d'un disque optique
+Documentation=https://github.com/flavi1/disc-launcher
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=@BINDIR@/disc-launcherd --foreground
+ExecReload=@BINDIR@/disc-launcher reload
+Restart=on-failure
+RestartSec=5
+# Dumps et programmes lancés (émulateurs, lecteurs) sont détachés du démon :
+# un arrêt du service ne doit pas les tuer.
+KillMode=process
+
+[Install]
+WantedBy=graphical-session.target

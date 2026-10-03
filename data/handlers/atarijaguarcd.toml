@@ -1,0 +1,42 @@
+# Gestionnaire « Atari Jaguar CD » (atarijaguarcd).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/atarijaguarcd.toml (fusion clé par clé).
+
+[handler]
+id = "atarijaguarcd"
+name = "Atari Jaguar CD"
+kind = "console"
+tags = ["console:atarijaguarcd"]
+
+
+[formats]
+target = "cue"
+accepted = ["cue", "cdi", "chd"]
+multidisc = false
+
+[dump]
+requires_profile = ["standard", "omnidrive"]
+verify = ["{stem}*.bin"]
+# Image cue/bin conservée telle quelle (BigPEmu).
+outputs = ["{stem}.cue", "{stem}*.bin"]
+
+[[dump.plan]]
+media = ["cd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+[resolvers]
+chain = ["redump-local"]
+
+[emulator]
+default = "bigpemu"
+
+[emulators.bigpemu]
+existing = ["bigpemu", "{path}"]
+

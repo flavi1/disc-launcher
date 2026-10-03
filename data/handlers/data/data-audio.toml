@@ -1,0 +1,12 @@
+# Disque de données ne contenant que de la musique (FLAC, MP3, Ogg, Opus…),
+# pochettes et fichiers d'information mis à part.
+# Lu par disc-launcher-data-generic : liste de lecture des fichiers ({playlist})
+# confiée au lecteur choisi dans [media] (clé « data-audio » de chaque lecteur).
+# Pour tout remplacer : exécutable disc-launcher-data-data-audio dans le PATH,
+# ou [handlers.data-audio] executable = "…".
+
+[handler]
+id = "data-audio"
+name = "Disque de musique (fichiers)"
+kind = "data"
+tags = ["data:audio"]

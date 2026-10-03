@@ -1,0 +1,11 @@
+# Média « HD DVD vidéo » (hddvd-video).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.hddvd-video] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-hddvd-video dans le PATH, ou réglez
+# [handlers.hddvd-video] executable = "…".
+
+[handler]
+id = "hddvd-video"
+name = "HD DVD vidéo"
+kind = "media"
+tags = ["video:hddvd"]

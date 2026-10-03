@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>disc-launcher</vendor>
+  <vendor_url>https://github.com/flavi1/disc-launcher</vendor_url>
+  <action id="io.github.flavi1.disclauncher.dump">
+    <description>Read an optical disc with vendor-specific commands</description>
+    <description xml:lang="fr">Lire un disque optique avec des commandes constructeur</description>
+    <message>Authentication is required to read this disc with vendor-specific commands</message>
+    <message xml:lang="fr">Une authentification est nécessaire pour lire ce disque avec des commandes constructeur</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <!-- Utilisateur local de la session active : sans mot de passe.
+           Remplacez par auth_admin_keep pour exiger une authentification. -->
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">@LIBEXECDIR@/disc-launcher/disc-launcher-helper</annotate>
+  </action>
+</policyconfig>

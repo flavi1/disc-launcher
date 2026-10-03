@@ -1,0 +1,16 @@
+#!/sbin/openrc-run
+# Exemple de service utilisateur OpenRC >= 0.60 (non pris en charge
+# officiellement). Voir contrib/README.md.
+
+description="disc-launcher : actions à l'insertion d'un disque optique"
+command="@BINDIR@/disc-launcherd"
+command_args="--foreground"
+command_background=true
+pidfile="${XDG_RUNTIME_DIR:-/tmp}/disc-launcherd.pid"
+extra_started_commands="reload"
+
+reload() {
+	ebegin "Rechargement de la configuration de disc-launcher"
+	"@BINDIR@/disc-launcher" reload >/dev/null
+	eend $?
+}

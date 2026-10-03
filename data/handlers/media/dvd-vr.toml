@@ -1,0 +1,11 @@
+# Média « DVD enregistrable (DVD-VR) » (dvd-vr).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.dvd-vr] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-dvd-vr dans le PATH, ou réglez
+# [handlers.dvd-vr] executable = "…".
+
+[handler]
+id = "dvd-vr"
+name = "DVD enregistrable (DVD-VR)"
+kind = "media"
+tags = ["video:dvd-vr"]

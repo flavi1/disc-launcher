@@ -1,0 +1,40 @@
+# Gestionnaire « Sega Mega Drive / Genesis » (megadrive) : cartouches lues par une Retrode.
+# Exécuté par disc-launcher-generic. La cartouche apparaît comme un fichier
+# ROM ({device}) sur le volume RETRODE. Lire ce fichier revient à dumper la
+# cartouche : on ne joue donc jamais depuis la Retrode, on copie (« dump »,
+# normalisé, vérifié par l'empreinte No-Intro) puis on joue la copie.
+# Surcharge partielle : ~/.local/share/disc-launcher/handlers/megadrive.toml
+
+[handler]
+id = "megadrive"
+name = "Sega Mega Drive / Genesis"
+kind = "console"
+tags = ["console:megadrive"]
+regional_folders = { USA = "genesis", default = "megadrive" }
+
+[formats]
+target = "md"
+accepted = ["md", "bin", "gen", "smd", "zip", "7z"]
+multidisc = false
+
+[dump]
+verify = ["{stem}.md"]
+outputs = ["{stem}.md"]
+
+[[dump.plan]]
+name = "copie"
+media = ["cart"]
+
+[[dump.plan.step]]
+name = "copy"
+command = ["disc-launcher", "rom", "copy", "{device}", "{tmp}/{stem}.md"]
+progress = "none"
+
+[resolvers]
+chain = ["redump-local"]
+
+[emulator]
+default = "retroarch"
+
+[emulators.retroarch]
+existing = ["retroarch", "-L", "{cores_dir}/genesis_plus_gx_libretro.so", "{path}"]

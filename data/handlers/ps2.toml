@@ -1,0 +1,115 @@
+# Gestionnaire « Sony PlayStation 2 » (ps2).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/ps2.toml (fusion clé par clé).
+
+[handler]
+id = "ps2"
+name = "Sony PlayStation 2"
+kind = "console"
+tags = ["console:ps2"]
+
+
+[formats]
+target = "chd"
+accepted = ["chd", "iso", "cso", "cue", "m3u"]
+multidisc = true
+
+[dump]
+requires_profile = ["standard", "omnidrive"]
+verify = ["{stem}*.bin", "{stem}.iso"]
+outputs = ["{stem}.chd"]
+
+# Jeux sur CD (disques bleus)
+[[dump.plan]]
+media = ["cd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["chdman", "createcd", "--force", "-i", "{tmp}/{stem}.cue", "-o", "{tmp}/{stem}.chd"]
+progress = "chdman"
+
+# Jeux sur DVD
+[[dump.plan]]
+media = ["dvd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["chdman", "createdvd", "--force", "-i", "{tmp}/{stem}.iso", "-o", "{tmp}/{stem}.chd"]
+progress = "chdman"
+
+# Repli sans redumper : cdrdao (empaqueté partout). Secteurs complets et pistes
+# audio conservés, mais image non conforme Redump (décalage du lecteur non
+# corrigé, une seule piste .bin) et protections par sous-canal (LibCrypt…) perdues.
+[[dump.plan]]
+name = "cdrdao"
+media = ["cd"]
+exact = false
+verify = []
+
+[[dump.plan.step]]
+name = "read"
+command = ["cdrdao", "read-cd", "--read-raw", "--driver", "generic-mmc-raw", "--device", "{device}", "--datafile", "{stem}.bin", "{stem}.toc"]
+progress = "none"
+
+[[dump.plan.step]]
+name = "cue"
+command = ["toc2cue", "{stem}.toc", "{stem}.cue"]
+progress = "none"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["chdman", "createcd", "--force", "-i", "{tmp}/{stem}.cue", "-o", "{tmp}/{stem}.chd"]
+progress = "chdman"
+
+# Repli sans redumper : dd. Un DVD n'a ni pistes audio ni sous-canal : l'image
+# lue est la même, à condition que la lecture soit sans erreur (dd s'arrête
+# alors, plutôt que de produire une image trouée).
+[[dump.plan]]
+name = "dd"
+media = ["dvd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["dd", "if={device}", "of={tmp}/{stem}.iso", "bs=2048", "iflag=fullblock"]
+progress = "none"
+
+[[dump.plan.step]]
+name = "convert"
+command = ["chdman", "createdvd", "--force", "-i", "{tmp}/{stem}.iso", "-o", "{tmp}/{stem}.chd"]
+progress = "chdman"
+
+[convert]
+from = ["iso", "cue"]
+command = ["chdman", "createdvd", "--force", "-i", "{input}", "-o", "{output}"]
+
+[verify_cmd]
+chd = ["chdman", "verify", "-i", "{path}"]
+
+[resolvers]
+chain = ["redump-local", "serials"]
+
+[emulator]
+default = "pcsx2"
+
+[emulators.pcsx2]
+# Premier programme trouvé dans le PATH ; [handlers.<id>] program = "…" dans
+# config.toml le remplace (AppImage, chemin complet).
+program = ["pcsx2-qt", "pcsx2", "PCSX2.AppImage"]
+existing = ["pcsx2-qt", "-batch", "--", "{path}"]
+# Option de lecture du lecteur physique : à vérifier selon la version de PCSX2.
+disc = ["pcsx2-qt", "-batch", "-disc", "{device}"]
+

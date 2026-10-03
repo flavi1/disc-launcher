@@ -1,0 +1,231 @@
+# Signatures des disques de consoles et d'ordinateurs.
+# Format : voir src/identify/signatures.rs. Une signature de même `id` placée
+# dans ~/.config/disc-launcher/signatures/ remplace celle-ci.
+
+# --- Sony -------------------------------------------------------------------
+
+[[signature]]
+id = "sony-systemcnf"
+tag = "console:psx"            # le post-traitement « sony » bascule en ps2 si BOOT2
+confidence = "certain"
+media = ["cd", "dvd"]
+track = "first-data"
+parser = "sony"
+[[signature.match]]
+system_id = "PLAYSTATION"
+[[signature.match]]
+file = "SYSTEM.CNF"
+
+[[signature]]
+id = "psx-pvd"
+tag = "console:psx"            # premiers jeux sans SYSTEM.CNF (PSX.EXE)
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+system_id = "PLAYSTATION"
+[[signature.not]]
+file = "SYSTEM.CNF"
+
+# --- Sega -------------------------------------------------------------------
+
+[[signature]]
+id = "saturn"
+tag = "console:saturn"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+parser = "saturn"
+[[signature.match]]
+sector = 0
+offset = 0
+ascii = "SEGA SEGASATURN"
+[signature.fields]
+serial = { sector = 0, offset = 0x20, len = 10 }
+revision = { sector = 0, offset = 0x2A, len = 6 }
+disc_raw = { sector = 0, offset = 0x38, len = 8 }
+region_raw = { sector = 0, offset = 0x40, len = 10 }
+title = { sector = 0, offset = 0x60, len = 112 }
+
+[[signature]]
+id = "megacd"
+tag = "console:megacd"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+parser = "megacd"
+[[signature.match]]
+sector = 0
+offset = 0
+ascii = "SEGADISCSYSTEM"
+[signature.fields]
+title = { sector = 0, offset = 0x150, len = 48 }
+serial = { sector = 0, offset = 0x180, len = 14 }
+region_raw = { sector = 0, offset = 0x1F0, len = 3 }
+
+[[signature]]
+id = "dreamcast-ipbin"
+tag = "console:dreamcast"      # MIL-CD, CD-R, ou zone HD exposée par le lecteur
+confidence = "certain"
+media = ["cd"]
+track = "any-data"
+parser = "dreamcast"
+[[signature.match]]
+sector = 0
+offset = 0
+ascii = "SEGA SEGAKATANA"
+[signature.fields]
+disc_raw = { sector = 0, offset = 0x20, len = 16 }
+region_raw = { sector = 0, offset = 0x30, len = 8 }
+serial = { sector = 0, offset = 0x40, len = 10 }
+revision = { sector = 0, offset = 0x4A, len = 6 }
+title = { sector = 0, offset = 0x80, len = 128 }
+
+# --- Nintendo (lecteur OmniDrive ou Friidump, ou image) ---------------------
+
+[[signature]]
+id = "gamecube"
+tag = "console:gc"
+confidence = "certain"
+media = ["dvd"]
+track = "first-data"
+parser = "nintendo"
+[[signature.match]]
+sector = 0
+offset = 0x1C
+hex = "C2339F3D"
+[signature.fields]
+game_id = { sector = 0, offset = 0, len = 6 }
+disc_raw = { sector = 0, offset = 6, len = 1, enc = "u8" }
+rev_raw = { sector = 0, offset = 7, len = 1, enc = "u8" }
+title = { sector = 0, offset = 0x20, len = 64 }
+
+[[signature]]
+id = "wii"
+tag = "console:wii"
+confidence = "certain"
+media = ["dvd"]
+track = "first-data"
+parser = "nintendo"
+[[signature.match]]
+sector = 0
+offset = 0x18
+hex = "5D1C9EA3"
+[signature.fields]
+game_id = { sector = 0, offset = 0, len = 6 }
+disc_raw = { sector = 0, offset = 6, len = 1, enc = "u8" }
+rev_raw = { sector = 0, offset = 7, len = 1, enc = "u8" }
+title = { sector = 0, offset = 0x20, len = 64 }
+
+[[signature]]
+id = "wiiu"
+tag = "console:wiiu"
+confidence = "strong"
+media = ["bd", "dvd"]
+track = "first-data"
+[[signature.match]]
+sector = 0
+offset = 0
+ascii = "WUP-"
+[signature.fields]
+serial = { sector = 0, offset = 0, len = 10 }
+
+# --- NEC --------------------------------------------------------------------
+
+[[signature]]
+id = "pcenginecd"
+tag = "console:pcenginecd"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+contains = "PC Engine CD-ROM SYSTEM"
+sectors = [0, 1]
+
+[[signature]]
+id = "pcfx"
+tag = "console:pcfx"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+contains = "PC-FX:Hu_CD-ROM"
+sectors = [0, 1]
+
+# --- SNK, Panasonic, Philips, Commodore ---------------------------------------
+
+[[signature]]
+id = "neogeocd"
+tag = "console:neogeocd"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+file = "IPL.TXT"
+
+[[signature]]
+id = "3do"
+tag = "console:3do"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+sector = 0
+offset = 0
+hex = "015A5A5A5A5A01"
+[signature.fields]
+label = { sector = 0, offset = 0x28, len = 32 }
+
+[[signature]]
+id = "cdi-disctype"
+tag = "console:cdimono1"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+disc_type = 0x10
+[[signature.not]]
+dir = "MPEGAV"
+[[signature.not]]
+dir = "MPEG2"
+
+[[signature]]
+id = "cdi-rtos"
+tag = "console:cdimono1"
+confidence = "strong"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+contains = "CD-RTOS"
+sectors = [16, 16]
+# Les VCD/SVCD contiennent aussi une application CD-i : on les exclut.
+[[signature.not]]
+dir = "MPEGAV"
+[[signature.not]]
+dir = "MPEG2"
+[[signature.not]]
+dir = "VCD"
+[[signature.not]]
+dir = "SVCD"
+
+[[signature]]
+id = "amigacd32"
+tag = "console:amigacd32"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+file = "CD32.TM"
+
+[[signature]]
+id = "cdtv"
+tag = "console:cdtv"
+confidence = "certain"
+media = ["cd"]
+track = "first-data"
+[[signature.match]]
+file = "CDTV.TM"
+
+# Systèmes sans signature fiable connue à ce jour (ajouter ici quand elles le
+# seront) : fmtowns, pc98, naomigd. Leur gestionnaire existe et peut être
+# choisi manuellement : disc-launcher run dump --system fmtowns /dev/sr0

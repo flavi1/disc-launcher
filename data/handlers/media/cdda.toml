@@ -1,0 +1,11 @@
+# Média « CD audio » (cdda).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.cdda] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-cdda dans le PATH, ou réglez
+# [handlers.cdda] executable = "…".
+
+[handler]
+id = "cdda"
+name = "CD audio"
+kind = "media"
+tags = ["audio:cdda"]

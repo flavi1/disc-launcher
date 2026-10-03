@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=disc-launcher
+Comment=Disques optiques : Kodi, émulateurs, dumps vers ~/ROMs
+Comment[en]=Optical discs: Kodi, emulators, dumps to ~/ROMs
+Exec=disc-launcher status
+Icon=media-optical
+NoDisplay=true
+Terminal=true
+Categories=Utility;

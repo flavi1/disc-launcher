@@ -1,0 +1,17 @@
+# Coquille native KDE Plasma / LXQt (mode « hybride ») :
+# ~/.local/share/solid/actions/ ou /usr/share/solid/actions/
+# Prédicat strict : CD audio pur (pas de piste de données), DVD vidéo, Blu-ray vidéo.
+# La commande revérifie le disque et refuse s'il s'agit d'un jeu ; l'application
+# de lecture est celle de [media] dans config.toml (Kodi, mpv, VLC…).
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=SolidDevice
+X-KDE-Solid-Predicate=[ IS OpticalDisc AND [ [ OpticalDisc.availableContent == 'Audio' OR OpticalDisc.availableContent & 'VideoDvd' ] OR OpticalDisc.availableContent & 'VideoBluRay' ] ]
+Actions=disc-launcher-play;
+X-KDE-Priority=TopLevel
+
+[Desktop Action disc-launcher-play]
+Name=Lire le disque (disc-launcher)
+Name[en]=Play disc (disc-launcher)
+Icon=media-optical
+Exec=disc-launcher run play-disc %d

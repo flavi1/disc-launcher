@@ -1,0 +1,12 @@
+[Unit]
+Description=disc-launcher : actions à l'insertion d'un disque optique
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/disc-launcherd --foreground
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target

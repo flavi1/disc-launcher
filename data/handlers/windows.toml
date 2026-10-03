@@ -1,0 +1,70 @@
+# Gestionnaire « Jeux PC (CD/DVD) » (windows).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/windows.toml (fusion clé par clé).
+
+[handler]
+id = "windows"
+name = "Jeux PC (CD/DVD)"
+kind = "console"
+# Identification heuristique : activez-la avec allow_heuristic = true
+# dans [handlers.windows] de config.toml.
+tags = ["console:windows"]
+
+
+[formats]
+target = "cue"
+accepted = ["cue", "iso", "chd"]
+multidisc = false
+
+[dump]
+requires_profile = ["standard", "omnidrive"]
+verify = ["{stem}*.bin"]
+outputs = ["{stem}.cue", "{stem}*.bin"]
+
+[[dump.plan]]
+media = ["cd", "dvd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+# Repli sans redumper : cdrdao (empaqueté partout). Secteurs complets et pistes
+# audio conservés, mais image non conforme Redump (décalage du lecteur non
+# corrigé, une seule piste .bin) et protections par sous-canal (LibCrypt…) perdues.
+[[dump.plan]]
+name = "cdrdao"
+media = ["cd"]
+exact = false
+verify = []
+
+[[dump.plan.step]]
+name = "read"
+command = ["cdrdao", "read-cd", "--read-raw", "--driver", "generic-mmc-raw", "--device", "{device}", "--datafile", "{stem}.bin", "{stem}.toc"]
+progress = "none"
+
+[[dump.plan.step]]
+name = "cue"
+command = ["toc2cue", "{stem}.toc", "{stem}.cue"]
+progress = "none"
+
+# Repli sans redumper : dd. Un DVD n'a ni pistes audio ni sous-canal : l'image
+# lue est la même, à condition que la lecture soit sans erreur (dd s'arrête
+# alors, plutôt que de produire une image trouée).
+[[dump.plan]]
+name = "dd"
+media = ["dvd"]
+outputs = ["{stem}.iso"]
+verify = ["{stem}.iso"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["dd", "if={device}", "of={tmp}/{stem}.iso", "bs=2048", "iflag=fullblock"]
+progress = "none"
+
+[resolvers]
+chain = ["redump-local"]
+

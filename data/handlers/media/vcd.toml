@@ -1,0 +1,11 @@
+# Média « Video CD » (vcd).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.vcd] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-vcd dans le PATH, ou réglez
+# [handlers.vcd] executable = "…".
+
+[handler]
+id = "vcd"
+name = "Video CD"
+kind = "media"
+tags = ["video:vcd"]

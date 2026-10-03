@@ -1,0 +1,42 @@
+# Gestionnaire « Microsoft Xbox 360 » (xbox360).
+# Exécuté par disc-launcher-generic (ou l'exécutable choisi dans la
+# configuration). Les lignes de commande sont des valeurs par défaut :
+# vérifiez-les pour vos versions d'outils et surchargez-les dans
+# ~/.config/disc-launcher/handlers/xbox360.toml (fusion clé par clé).
+
+[handler]
+id = "xbox360"
+name = "Microsoft Xbox 360"
+kind = "console"
+tags = ["console:xbox360"]
+
+
+[formats]
+target = "iso"
+accepted = ["iso", "xex", "zar"]
+multidisc = true
+
+[dump]
+requires_profile = ["omnidrive", "kreon"]
+verify = ["{stem}.iso"]
+outputs = ["{stem}.iso"]
+
+[[dump.plan]]
+media = ["dvd"]
+
+[[dump.plan.step]]
+name = "read"
+command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
+helper = true
+progress = "redumper"
+
+[resolvers]
+chain = ["redump-local", "serials"]
+
+[emulator]
+default = "xenia"
+
+# Xenia s'exécute généralement via Wine ou Proton : adaptez la commande.
+[emulators.xenia]
+existing = ["xenia_canary", "{path}"]
+

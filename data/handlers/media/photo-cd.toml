@@ -1,0 +1,11 @@
+# Média « Photo CD » (photo-cd).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.photo-cd] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-photo-cd dans le PATH, ou réglez
+# [handlers.photo-cd] executable = "…".
+
+[handler]
+id = "photo-cd"
+name = "Photo CD"
+kind = "media"
+tags = ["photo:cd"]

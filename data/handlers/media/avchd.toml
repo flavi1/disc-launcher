@@ -1,0 +1,11 @@
+# Média « AVCHD » (avchd).
+# Lu par disc-launcher-media-generic avec le lecteur choisi dans [media]
+# (ou [handlers.avchd] player = "…") de config.toml. Pour tout remplacer,
+# déposez un exécutable disc-launcher-media-avchd dans le PATH, ou réglez
+# [handlers.avchd] executable = "…".
+
+[handler]
+id = "avchd"
+name = "AVCHD"
+kind = "media"
+tags = ["video:avchd"]
