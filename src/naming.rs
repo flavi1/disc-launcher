@@ -163,6 +163,11 @@ fn cache_get(key: &str, max_days: i64) -> Option<Resolution> {
     if util::now_secs() - t > max_days * 86400 {
         return None;
     }
+    // Base de référence mise à jour depuis : l'entrée est périmée.
+    let db_mtime = std::fs::metadata(refdb::db_path()).ok().and_then(|m| m.modified().ok()).and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
+    if db_mtime.is_some_and(|m| m >= t) {
+        return None;
+    }
     Resolution::from_value(&e["resolution"])
 }
 
@@ -193,11 +198,6 @@ pub fn resolution_from_name(name: &str, confidence: NameConfidence, source: &str
 /// Chaîne : cache → collection → base locale → résolveurs externes → repli.
 pub fn resolve(id: &Identity, phys: &Physical, rc: &ResolveCtx) -> Resolution {
     let key = id.key();
-    if rc.use_cache {
-        if let Some(r) = cache_get(&key, rc.cfg.cache_days()) {
-            return r;
-        }
-    }
     if let Some(col) = rc.collection {
         if let Some(e) = col.find_key(&key, Some(&rc.cfg.roms_dir())) {
             // Nom canonique enregistré au dump (le fichier a pu être renommé depuis).
@@ -219,6 +219,13 @@ pub fn resolve(id: &Identity, phys: &Physical, rc: &ResolveCtx) -> Resolution {
             return r;
         }
         best = Some(r);
+    }
+    // Cache des résolveurs (en ligne notamment), seulement si la base locale
+    // n'a rien donné : la base, mise à jour, l'emporte toujours.
+    if best.is_none() && rc.use_cache {
+        if let Some(r) = cache_get(&key, rc.cfg.cache_days()) {
+            return r;
+        }
     }
     for name in rc.manifest.resolver_chain() {
         if name == "redump-local" {
