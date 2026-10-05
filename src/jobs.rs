@@ -431,7 +431,17 @@ pub fn run(id: &str) -> i32 {
             return 1;
         }
     };
-    if !sys::try_lock(lock.as_raw_fd(), true).unwrap_or(false) {
+    // `alive()` (démon, `disc-launcher watch`) teste le verrou en le prenant
+    // un instant : réessayer avant de conclure qu'une autre instance tourne.
+    let mut locked = false;
+    for _ in 0..40 {
+        if sys::try_lock(lock.as_raw_fd(), true).unwrap_or(false) {
+            locked = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    if !locked {
         eprintln!("tâche {id} déjà en cours");
         return 1;
     }
