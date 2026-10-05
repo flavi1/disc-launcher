@@ -393,6 +393,8 @@ unsafe extern "C" fn on_tick(_d: P) -> GBool {
 
 fn main() {
     let check = std::env::args().any(|a| a == "--check");
+    // Mourir avec le démon qui nous a lancé (arrêt brutal compris).
+    disclauncher::sys::set_parent_death_signal(disclauncher::sys::SIGTERM);
     let gtk = match Gtk::load() {
         Ok(x) => x,
         Err(e) => {
