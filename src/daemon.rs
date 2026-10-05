@@ -797,7 +797,7 @@ impl Daemon {
         if self.drive(dev).gen != gen {
             return;
         }
-        let offer = match res {
+        let mut offer = match res {
             Ok(o) => o,
             Err(e) => {
                 dl_log!(warn, "resolve", e, "drive" => dev);
@@ -805,6 +805,8 @@ impl Daemon {
                 return;
             }
         };
+        // Actions personnalisées de la configuration ([actions.<nom>]).
+        crate::custom::extend(&self.cfg, &offer.handler, &mut offer.actions);
         if let Some(t) = &offer.target {
             dl_log!(info, "resolve", "cible prédite", "drive" => dev, "target" => t.path.display(),
                 "confidence" => offer.resolution.as_ref().map(|r| r.confidence.name()).unwrap_or("-"),
@@ -1277,6 +1279,34 @@ impl Daemon {
     /// Actions sur le périphérique lui-même (sans proposition nécessaire) :
     /// tiroir, montage, gestionnaire de fichiers. Vrai si `key` en est une.
     fn perform_device(&mut self, dev: &str, key: &str) -> bool {
+        if key.starts_with(crate::custom::PREFIX) {
+            let Some(a) = crate::custom::get(&self.cfg, key) else {
+                self.error_notif(dev, &format!("action inconnue : {key} (voir [actions] dans la configuration)"));
+                return true;
+            };
+            let d = self.drives.get(dev);
+            let o = d.and_then(|d| d.offer.clone());
+            let ident = d.and_then(|d| d.ident.clone());
+            let usb_label = d.and_then(|d| d.usb.as_ref().map(|v| v.label.clone()));
+            let label = usb_label.or_else(|| ident.as_ref().and_then(|i| i.volume_id.clone()));
+            let existing = o.as_ref().and_then(|o| o.situation.as_ref()).and_then(|s| s.existing()).map(|p| p.to_string_lossy().into_owned());
+            let real_dev = d.and_then(|d| d.usb.as_ref().map(|v| v.dev.clone())).unwrap_or_else(|| dev.to_string());
+            let handler = o.as_ref().map(|o| o.handler.clone()).unwrap_or_default();
+            let ctx = crate::custom::Ctx {
+                handler: &handler,
+                device: Some(&real_dev),
+                ident: ident.as_ref(),
+                tag: o.as_ref().map(|o| o.tag.as_str()),
+                resolution: o.as_ref().and_then(|o| o.resolution.as_ref()),
+                existing: existing.as_deref(),
+                label: label.as_deref(),
+            };
+            match crate::custom::run(&self.cfg, &a, &ctx) {
+                Ok(cmd) => dl_log!(info, "action", "action personnalisée lancée", "drive" => dev, "action" => a.name, "cmd" => cmd.join(" ")),
+                Err(e) => self.error_notif(dev, &e),
+            }
+            return true;
+        }
         match key {
             "open-files" => {
                 let cfg = self.cfg.clone();

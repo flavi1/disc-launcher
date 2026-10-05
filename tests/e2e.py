@@ -279,7 +279,8 @@ with open({states!r}, "a") as log:
             clicked = True
             print("action\\t" + usb[0]["id"] + "\\topen-files", flush=True)
 """, 0o755)
-    write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nfile_manager = ["{FAKE}/fm"]\n[ui]\npanel_command = ["{FAKE}/fake-panel"]\n')
+    write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nfile_manager = ["{FAKE}/fm"]\n[ui]\npanel_command = ["{FAKE}/fake-panel"]\n'
+          f'[actions.marque]\nlabel = "Marquer"\nhandlers = ["usb"]\ncommand = "echo \\"$DL_HANDLER $DL_LABEL\\" > {ROOT}/custom-ran"\n')
     tenv = dict(ENV, DBUS_SESSION_BUS_ADDRESS=addr, DISC_LAUNCHER_USB_DIRS=f"MA_CLE={usbdir}")
     d = subprocess.Popen([os.path.join(BIN, "disc-launcherd"), "--foreground"], env=tenv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     def gd(*a):
@@ -319,6 +320,14 @@ with open({states!r}, "a") as log:
     gd("--dest", name or "x", "--object-path", "/StatusNotifierItem", "--method", "org.kde.StatusNotifierItem.ContextMenu", "--", "0", "0")
     time.sleep(0.8)
     check(last_state()["visible"] is True, "clic droit sur l'icône → fenêtre réaffichée")
+    usb = [i for i in last_state()["items"] if i["id"].startswith("usb:")]
+    check(bool(usb) and ["custom:marque", "Marquer"] in usb[0]["actions"], "action personnalisée ([actions.marque]) proposée pour le volume USB")
+    subprocess.run([os.path.join(BIN, "disc-launcher"), "run", "custom:marque", usb[0]["id"] if usb else "x"], env=tenv, capture_output=True)
+    for _ in range(30):
+        if os.path.exists(os.path.join(ROOT, "custom-ran")):
+            break
+        time.sleep(0.1)
+    check(os.path.exists(os.path.join(ROOT, "custom-ran")) and open(os.path.join(ROOT, "custom-ran")).read().strip() == "usb MA_CLE", "action personnalisée exécutée avec les variables DL_*")
     d.send_signal(signal.SIGTERM)
     d.wait(timeout=10)
     bus.terminate()

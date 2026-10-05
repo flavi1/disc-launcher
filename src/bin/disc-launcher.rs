@@ -123,7 +123,10 @@ fn main() {
                 (identify::identify_device(&dev, &opts), dev)
             };
             let r = r.unwrap_or_else(|e| die(&format!("{dev} : {e}")));
-            let offer = daemon::prepare(&cfg, &dev, &r).ok();
+            let offer = daemon::prepare(&cfg, &dev, &r).ok().map(|mut o| {
+                disclauncher::custom::extend(&cfg, &o.handler, &mut o.actions);
+                o
+            });
             if flag("--json") {
                 println!("{}", jobj! {"identification" => r.to_value(), "offer" => offer.as_ref().map(daemon::offer_value)}.to_pretty());
                 return;
