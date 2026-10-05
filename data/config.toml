@@ -38,10 +38,16 @@ terminal_command = []
 # file_manager = ["dolphin"]
 file_manager = []
 
+[ui]
+# Fenêtre « Disques et périphériques » : auto (GTK 3 si disponible, sinon
+# notifications) | notifications (notifications, puis kdialog/zenity/yad)
+panel = "auto"
+# Autre programme respectant le même protocole (voir disc-launcher-panel)
+# panel_command = []
+
 [tray]
-# Icône de la zone de notification (StatusNotifierItem) : clic gauche pour
-# afficher ou masquer les propositions, clic droit pour le menu de tous les
-# disques, cartouches et clés USB.
+# Icône de la zone de notification (StatusNotifierItem) : un clic affiche ou
+# masque la fenêtre.
 enabled = true
 
 [collection]
@@ -74,7 +80,7 @@ default = "ask"
 dos = "ignore"
 windows = "ignore"
 photo-cd = "ignore"
-# Disques de données, clés USB (notification à l'insertion)
+# Disques de données, volumes USB (ouverture de la fenêtre à l'insertion)
 # data = "ignore"
 # usb = "ignore"
 # media = "auto-play"

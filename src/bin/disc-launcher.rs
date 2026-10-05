@@ -349,6 +349,15 @@ fn doctor() {
     println!("logind         : {}", match logind { Some(true) => "session active", Some(false) => "session inactive", None => "indisponible (repli : droits sur le lecteur)" });
     println!("uevents noyau  : {}", if disclauncher::sys::uevent_socket().map(disclauncher::sys::close_fd).is_ok() { "oui" } else { "non (sondage seul)" });
     println!("notifications  : {}", match disclauncher::dbus::Connection::open(disclauncher::dbus::Bus::Session) { Ok(_) => "bus de session joignable", Err(_) => "bus de session injoignable" });
+    let panel = match disclauncher::panel::command(&cfg) {
+        None => "désactivée ([ui] panel = \"notifications\")".to_string(),
+        Some(cmd) => match std::process::Command::new(&cmd[0]).arg("--check").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped()).output() {
+            Ok(o) if o.status.success() => "GTK 3 disponible".to_string(),
+            Ok(o) => format!("indisponible : {} (repli : notifications)", String::from_utf8_lossy(&o.stderr).trim().trim_start_matches("disc-launcher-panel : ")),
+            Err(e) => format!("indisponible : {e} (repli : notifications)"),
+        },
+    };
+    println!("fenêtre        : {panel}");
     println!("dialogue       : {}", disclauncher::notify::dialog_tool().unwrap_or("aucun"));
     println!("pkexec         : {}", if paths::which("pkexec").is_some() { "oui" } else { "non" });
     {

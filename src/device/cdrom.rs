@@ -66,6 +66,21 @@ pub fn eject(path: &str) -> io::Result<()> {
     Ok(())
 }
 
+pub fn close_tray(path: &str) -> io::Result<()> {
+    let f = open_dev(path)?;
+    if unsafe { sys::ioctl(f.as_raw_fd(), sys::CDROMCLOSETRAY) } < 0 {
+        return Err(sys::last_err());
+    }
+    Ok(())
+}
+
+/// Fabricant et modèle du lecteur (sysfs), ex. « ASUS DRW-24F1ST ».
+pub fn drive_model(path: &str) -> String {
+    let name = path.trim_start_matches("/dev/");
+    let rd = |f: &str| std::fs::read_to_string(format!("/sys/block/{name}/device/{f}")).map(|s| s.trim().to_string()).unwrap_or_default();
+    format!("{} {}", rd("vendor"), rd("model")).trim().to_string()
+}
+
 /// Erreur SCSI avec données de sense.
 fn scsi_err(sense: &[u8], status: u8) -> io::Error {
     let (key, asc, ascq) = if sense.len() >= 14 && (sense[0] & 0x7f) >= 0x70 {

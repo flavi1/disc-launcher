@@ -39,6 +39,7 @@ pub mod control;
 pub mod daemon;
 pub mod dbus;
 pub mod notify;
+pub mod panel;
 pub mod terminal;
 pub mod tray;
 
