@@ -81,6 +81,10 @@ struct Drive {
     batch: Option<(String, String)>,
     /// Clé USB ou autre support amovible de données.
     usb: Option<crate::usb::Volume>,
+    /// État du tiroir (lecteurs optiques).
+    tray: Option<DriveStatus>,
+    /// Fabricant et modèle du lecteur optique.
+    model: Option<String>,
 }
 
 enum Event {
@@ -95,6 +99,7 @@ enum Event {
     /// Réponse de la boîte de dialogue n° gen : (périphérique, action) choisie.
     Dialog(u64, Option<(String, String)>),
     Tray(crate::tray::TrayEvent),
+    Panel(crate::panel::PanelEvent),
     /// Erreur survenue dans un fil d'action, à signaler.
     Error(String, String),
     Control(Value, Sender<Value>),
@@ -120,6 +125,17 @@ pub struct Daemon {
     dialog_map: Vec<(String, String)>,
     tray: Option<Sender<crate::tray::Model>>,
     tray_model: Option<crate::tray::Model>,
+    /// Fenêtre « Disques et périphériques » (disc-launcher-panel).
+    panel: Option<crate::panel::Panel>,
+    panel_cmd: Option<Vec<String>>,
+    /// Faux si le panneau ne peut pas s'afficher (pas de GTK 3, pas
+    /// d'affichage) : repli sur les notifications.
+    panel_ok: bool,
+    panel_ready: bool,
+    panel_visible: bool,
+    /// Ramener la fenêtre au premier plan au prochain envoi.
+    panel_raise: bool,
+    panel_starts: u32,
 }
 
 /// Lance le démon (bloquant). Renvoie un code de sortie.
@@ -236,7 +252,17 @@ pub fn run(foreground: bool) -> i32 {
         dialog_map: vec![],
         tray,
         tray_model: None,
+        panel: None,
+        panel_cmd: None,
+        panel_ok: false,
+        panel_ready: false,
+        panel_visible: false,
+        panel_raise: false,
+        panel_starts: 0,
     };
+    d.panel_cmd = crate::panel::command(&d.cfg);
+    d.panel_ok = d.panel_cmd.is_some();
+    d.start_panel();
     // Tâches encore vivantes (démon relancé pendant un dump)
     for (id, st) in jobs::list() {
         if jobs::is_active(&st) && jobs::alive(&id) {
@@ -368,7 +394,7 @@ fn spawn_event_sources(tx: Sender<Event>) {
             }
         })
         .ok();
-    // Sondage de secours (toutes les 5 s) : état du tiroir/disque.
+    // Sondage de secours (toutes les 2 s) : état du tiroir/disque.
     std::thread::Builder::new()
         .name("poll".into())
         .spawn(move || {
@@ -377,15 +403,14 @@ fn spawn_event_sources(tx: Sender<Event>) {
                 for dev in crate::device::list_drives() {
                     let st = cdrom::drive_status(&dev).ok();
                     let prev = last.insert(dev.clone(), st);
-                    let changed = match (&prev, &st) {
-                        (Some(a), b) => a.map(|x| x == DriveStatus::DiscOk) != b.map(|x| x == DriveStatus::DiscOk),
-                        (None, _) => false,
-                    };
+                    // Tout changement (disque, tiroir ouvert ou fermé), y compris
+                    // une éjection faite hors de disc-launcher.
+                    let changed = matches!(&prev, Some(a) if *a != st);
                     if changed && tx.send(Event::Media(dev)).is_err() {
                         return;
                     }
                 }
-                std::thread::sleep(Duration::from_secs(5));
+                std::thread::sleep(Duration::from_secs(2));
             }
         })
         .ok();
@@ -450,7 +475,7 @@ fn handle_client(s: UnixStream, tx: Sender<Event>) {
 
 impl Daemon {
     fn drive(&mut self, dev: &str) -> &mut Drive {
-        self.drives.entry(dev.to_string()).or_insert_with(|| Drive { dev: dev.to_string(), state: DState::Empty, gen: 0, due: None, settle_until: None, ident: None, offer: None, notif: None, job: None, silent: false, batch: None, usb: None })
+        self.drives.entry(dev.to_string()).or_insert_with(|| Drive { dev: dev.to_string(), state: DState::Empty, gen: 0, due: None, settle_until: None, ident: None, offer: None, notif: None, job: None, silent: false, batch: None, usb: None, tray: None, model: None })
     }
 
     fn main_loop(&mut self, rx: Receiver<Event>) {
@@ -472,7 +497,7 @@ impl Daemon {
                 Err(_) => return,
             }
             self.tick();
-            self.update_tray();
+            self.update_ui();
         }
     }
 
@@ -592,6 +617,7 @@ impl Daemon {
                 }
             }
             Event::Tray(e) => self.on_tray(e),
+            Event::Panel(e) => self.on_panel(e),
             Event::Error(dev, msg) => self.error_notif(&dev, &msg),
             Event::Identified(dev, gen, res) => self.on_identified(&dev, gen, *res),
             Event::Prepared(dev, gen, res) => self.on_prepared(&dev, gen, *res),
@@ -673,6 +699,7 @@ impl Daemon {
         }
         let status = cdrom::drive_status(dev);
         let gen = self.drive(dev).gen;
+        self.drive(dev).tray = status.as_ref().ok().copied();
         match status {
             Ok(DriveStatus::DiscOk) => {
                 let d = self.drive(dev);
@@ -844,6 +871,11 @@ impl Daemon {
         let ident = self.drive(dev).ident.clone();
         let (summary, body) = offer_text(&self.cfg, &o, ident.as_ref());
         let actions: Vec<(String, String)> = o.actions.clone();
+        if self.use_panel() {
+            self.panel_visible = true;
+            self.panel_raise = true;
+            return;
+        }
         if self.use_dialog {
             self.refresh_dialog();
             return;
@@ -916,8 +948,90 @@ impl Daemon {
         }
     }
 
+    /// La fenêtre « Disques et périphériques » remplace les notifications.
+    fn use_panel(&self) -> bool {
+        self.panel_ok && self.panel_cmd.is_some()
+    }
+
+    fn start_panel(&mut self) {
+        let Some(cmd) = self.panel_cmd.clone() else { return };
+        if self.panel.is_some() || !self.panel_ok || self.panel_starts >= 5 {
+            return;
+        }
+        self.panel_starts += 1;
+        let (ptx, prx) = mpsc::channel::<crate::panel::PanelEvent>();
+        match crate::panel::Panel::start(&cmd, ptx) {
+            Ok(p) => {
+                self.panel = Some(p);
+                self.panel_ready = false;
+                let tx = self.tx.clone();
+                std::thread::spawn(move || {
+                    while let Ok(e) = prx.recv() {
+                        if tx.send(Event::Panel(e)).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                dl_log!(warn, "panel", format!("fenêtre indisponible ({e}) : notifications"), "cmd" => cmd.join(" "));
+                self.panel_ok = false;
+            }
+        }
+    }
+
+    fn on_panel(&mut self, e: crate::panel::PanelEvent) {
+        use crate::panel::PanelEvent;
+        match e {
+            PanelEvent::Ready => {
+                self.panel_ready = true;
+                dl_log!(info, "panel", "fenêtre « Disques et périphériques » prête");
+            }
+            PanelEvent::Hidden => self.hide_all(),
+            PanelEvent::Action(id, key) => {
+                dl_log!(info, "panel", "action choisie", "drive" => id, "action" => key);
+                if let Some(j) = id.strip_prefix("job:") {
+                    if key == "cancel" {
+                        if let Err(e) = jobs::cancel(j) {
+                            dl_log!(warn, "job", e, "job" => j);
+                        }
+                    }
+                    return;
+                }
+                self.act(&id, &key);
+            }
+            PanelEvent::Exited(_) => {
+                let code = self.panel.as_mut().and_then(|p| {
+                    for _ in 0..20 {
+                        if let Some(c) = p.exit_code() {
+                            return Some(c);
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    None
+                });
+                self.panel = None;
+                if !self.panel_ready || code == Some(Some(3)) {
+                    // Pas de GTK 3 ou pas d'affichage : notifications.
+                    dl_log!(warn, "panel", "fenêtre indisponible (GTK 3 ou affichage absent) : propositions en notifications");
+                    self.panel_ok = false;
+                    if self.panel_visible {
+                        self.panel_visible = false;
+                        self.show_all();
+                    }
+                } else {
+                    dl_log!(warn, "panel", "la fenêtre s'est arrêtée ; elle sera relancée", "code" => format!("{code:?}"));
+                }
+                self.panel_ready = false;
+            }
+        }
+    }
+
     /// Des propositions sont-elles affichées ?
     fn offers_visible(&self) -> bool {
+        if self.use_panel() {
+            return self.panel_visible;
+        }
         self.drives.values().any(|d| d.state == DState::Offering)
     }
 
@@ -933,10 +1047,17 @@ impl Daemon {
             }
         }
         self.close_dialog();
+        self.panel_visible = false;
     }
 
     /// Réaffiche les propositions de tous les périphériques présents.
     fn show_all(&mut self) {
+        if self.use_panel() {
+            self.panel_visible = true;
+            self.panel_raise = true;
+            self.start_panel();
+            return;
+        }
         let devs: Vec<String> = self.drives.values().filter(|d| matches!(d.state, DState::Idle | DState::Offering) && d.offer.as_ref().is_some_and(|o| !o.actions.is_empty())).map(|d| d.dev.clone()).collect();
         for dev in &devs {
             self.drive(dev).state = DState::Offering;
@@ -960,31 +1081,13 @@ impl Daemon {
     }
 
     fn on_tray(&mut self, e: crate::tray::TrayEvent) {
-        use crate::tray::TrayEvent;
         match e {
-            TrayEvent::Activate => {
+            crate::tray::TrayEvent::Activate => {
                 if self.offers_visible() {
                     self.hide_all();
                 } else {
                     self.show_all();
                 }
-            }
-            TrayEvent::Action(dev, key) if dev.is_empty() => match key.as_str() {
-                "show" => self.show_all(),
-                "hide" => self.hide_all(),
-                _ => {}
-            },
-            TrayEvent::Action(dev, key) => {
-                if let Some(id) = dev.strip_prefix("job:") {
-                    if key == "cancel" {
-                        if let Err(e) = jobs::cancel(id) {
-                            dl_log!(warn, "job", e, "job" => id);
-                        }
-                    }
-                    return;
-                }
-                dl_log!(info, "tray", "action choisie", "drive" => dev, "action" => key);
-                self.act(&dev, &key);
             }
         }
     }
@@ -1031,39 +1134,129 @@ impl Daemon {
         });
     }
 
-    /// Menu de l'icône : tous les périphériques et leurs actions, puis les tâches.
-    fn update_tray(&mut self) {
-        let Some(tx) = &self.tray else { return };
-        let mut m = crate::tray::Model::default();
-        for d in self.drives.values() {
+    /// Élément « tâche » de la fenêtre : titre, étape, progression, Annuler.
+    fn job_item(&self, id: &str) -> Option<Value> {
+        let (st, plan) = (jobs::read_state(id)?, jobs::read_plan(id)?);
+        if !jobs::is_active(&st) {
+            return None;
+        }
+        let label = match plan["kind"].as_str() {
+            Some("verify") => t("job-verify"),
+            Some("convert") => t("convert"),
+            _ if plan["cart"].bool_or(false) => t("job-copy"),
+            _ => t("job-dump"),
+        };
+        let pct = st["progress"].i64_or(0).clamp(0, 100);
+        let step = format!("{} {}/{} — {}", t("step"), st["step_index"].i64_or(1), st["steps_total"].i64_or(1), st["step"].str_or("…"));
+        Some(jobj! {
+            "id" => format!("job:{id}"), "icon" => crate::tray::ICON,
+            "title" => format!("{label} : {}", plan["title"].str_or("")),
+            "lines" => vec![Value::from(step)],
+            "progress" => jobj! {"fraction" => pct as f64 / 100.0, "text" => format!("{pct} %")},
+            "actions" => vec![Value::from(vec![Value::from("cancel"), Value::from(t("cancel"))])],
+        })
+    }
+
+    /// Éléments de la fenêtre : lecteurs optiques (même vides), cartouches,
+    /// volumes USB, puis tâches sans lecteur (vérification, conversion).
+    fn panel_items(&mut self) -> Vec<(u8, Value)> {
+        let pairs = |a: &[(String, String)]| -> Value { a.iter().map(|(k, l)| Value::from(vec![Value::from(k.clone()), Value::from(l.clone())])).collect::<Vec<_>>().into() };
+        let mut out: Vec<(u8, Value)> = vec![];
+        let mut shown_jobs: Vec<String> = vec![];
+        let devs: Vec<String> = self.drives.keys().cloned().collect();
+        for dev in devs {
+            if dev.starts_with("/dev/sr") && self.drives[&dev].model.is_none() {
+                self.drive(&dev).model = Some(cdrom::drive_model(&dev));
+            }
+            let d = &self.drives[&dev];
             if d.state == DState::Job {
+                if let Some(it) = d.job.as_deref().and_then(|j| self.job_item(j)) {
+                    shown_jobs.push(d.job.clone().unwrap_or_default());
+                    out.push((0, it));
+                    continue;
+                }
+            }
+            let optical = dev.starts_with("/dev/sr");
+            let short = dev.trim_start_matches("/dev/").to_string();
+            let drive_line = d.model.as_deref().filter(|m| !m.is_empty()).map(|m| format!("{} : {m} ({short})", t("drive-label"))).unwrap_or_else(|| format!("{} ({short})", t("drive")));
+            let busy = matches!(d.state, DState::Settling | DState::Identifying | DState::Resolving);
+            if let (Some(o), false) = (&d.offer, busy && optical) {
+                let (summary, body) = offer_text(&self.cfg, o, d.ident.as_ref());
+                let mut lines: Vec<Value> = vec![];
+                if optical {
+                    lines.push(drive_line.clone().into());
+                }
+                lines.extend(body.lines().filter(|l| !l.is_empty()).map(|l| Value::from(l.to_string())));
+                let mut usage = Value::Null;
+                if let Some(v) = &d.usb {
+                    if let Some(mp) = v.mount.clone().or_else(|| crate::device::find_mount_point(&v.dev)) {
+                        if let Ok((total, free)) = sys::fs_usage(&mp) {
+                            if total > 0 {
+                                usage = jobj! {"fraction" => (total - free.min(total)) as f64 / total as f64,
+                                    "text" => format!("{} {} {}", crate::usb::human_size(free), t("free-of"), crate::usb::human_size(total))};
+                            }
+                        }
+                    }
+                }
+                let kind = if optical { 0 } else if d.usb.is_some() { 2 } else { 1 };
+                out.push((kind, jobj! {"id" => dev.clone(), "icon" => offer_icon(o), "title" => summary, "lines" => lines, "usage" => usage, "progress" => Value::Null, "actions" => pairs(&o.actions)}));
                 continue;
             }
-            let Some(o) = &d.offer else { continue };
-            let (summary, _) = offer_text(&self.cfg, o, d.ident.as_ref());
-            m.entries.push(crate::tray::Entry { dev: d.dev.clone(), title: summary, icon: offer_icon(o), actions: o.actions.clone() });
-        }
-        for id in &self.active_jobs {
-            let (Some(st), Some(plan)) = (jobs::read_state(id), jobs::read_plan(id)) else { continue };
-            if !jobs::is_active(&st) {
+            if !optical {
                 continue;
             }
-            let label = match plan["kind"].as_str() {
-                Some("verify") => t("verify"),
-                Some("convert") => t("convert"),
-                _ if plan["cart"].bool_or(false) => t("job-copy"),
-                _ => t("job-dump"),
+            // Lecteur sans proposition : vide, tiroir ouvert, lecture en cours…
+            let (state_txt, actions): (&str, Vec<(String, String)>) = if busy {
+                (t("drive-reading"), vec![("eject".into(), t("eject").into())])
+            } else {
+                match d.tray {
+                    Some(DriveStatus::TrayOpen) => (t("tray-open"), vec![("close-tray".into(), t("close-tray").into())]),
+                    Some(DriveStatus::DiscOk) => {
+                        let blank = d.ident.as_ref().and_then(|i| i.primary()).is_some_and(|m| m.tag == "blank");
+                        (if blank { t("blank-disc") } else { t("unknown-content") }, vec![("eject".into(), t("eject").into())])
+                    }
+                    _ => (t("drive-empty"), vec![("open-tray".into(), t("open-tray").into())]),
+                }
             };
-            let title = format!("{label} : {} ({} %)", plan["title"].str_or(""), st["progress"].i64_or(0).clamp(0, 100));
-            m.entries.push(crate::tray::Entry { dev: format!("job:{id}"), title, icon: "media-optical".into(), actions: vec![("cancel".into(), t("cancel").into())] });
+            let title = format!("{} ({short}) — {state_txt}", t("drive"));
+            let lines: Vec<Value> = d.model.iter().filter(|m| !m.is_empty()).map(|m| Value::from(m.clone())).collect();
+            out.push((0, jobj! {"id" => dev.clone(), "icon" => "drive-optical", "title" => title, "lines" => lines, "usage" => Value::Null, "progress" => Value::Null, "actions" => pairs(&actions), "idle" => true}));
         }
-        if m.entries.iter().any(|e| !e.dev.starts_with("job:")) {
-            m.general = if self.offers_visible() { vec![("hide".into(), t("tray-hide").into())] } else { vec![("show".into(), t("tray-show").into())] };
+        for id in self.active_jobs.clone() {
+            if !shown_jobs.contains(&id) {
+                if let Some(it) = self.job_item(&id) {
+                    out.push((3, it));
+                }
+            }
         }
-        m.tooltip = m.entries.iter().map(|e| e.title.clone()).collect::<Vec<_>>().join("\n");
-        if self.tray_model.as_ref() != Some(&m) {
-            let _ = tx.send(m.clone());
-            self.tray_model = Some(m);
+        out.sort_by_key(|(k, _)| *k);
+        out
+    }
+
+    /// Fenêtre et icône : état à jour (envoyé seulement s'il a changé).
+    fn update_ui(&mut self) {
+        let items: Vec<Value> = self.panel_items().into_iter().map(|(_, v)| v).collect();
+        let present: Vec<&Value> = items.iter().filter(|v| !v["idle"].bool_or(false)).collect();
+        if let Some(tx) = &self.tray {
+            let tooltip = if present.is_empty() { t("tray-empty").to_string() } else { present.iter().map(|v| v["title"].str_or("").to_string()).collect::<Vec<_>>().join("\n") };
+            let m = crate::tray::Model { active: !present.is_empty(), tooltip };
+            if self.tray_model.as_ref() != Some(&m) {
+                let _ = tx.send(m.clone());
+                self.tray_model = Some(m);
+            }
+        }
+        if !self.use_panel() {
+            return;
+        }
+        if self.panel.is_none() && self.panel_visible {
+            self.start_panel();
+        }
+        let raise = std::mem::take(&mut self.panel_raise);
+        let state = jobj! {"visible" => self.panel_visible, "raise" => raise, "title" => t("panel-title"), "empty" => t("tray-empty"), "items" => items};
+        if let Some(p) = self.panel.as_mut() {
+            if let Err(e) = p.send(&state) {
+                dl_log!(debug, "panel", format!("envoi impossible : {e}"));
+            }
         }
     }
 
@@ -1081,8 +1274,86 @@ impl Daemon {
         None
     }
 
+    /// Actions sur le périphérique lui-même (sans proposition nécessaire) :
+    /// tiroir, montage, gestionnaire de fichiers. Vrai si `key` en est une.
+    fn perform_device(&mut self, dev: &str, key: &str) -> bool {
+        match key {
+            "open-files" => {
+                let cfg = self.cfg.clone();
+                let tx = self.tx.clone();
+                let d = dev.to_string();
+                let known = self.files_dir(dev);
+                std::thread::spawn(move || {
+                    let dir = match known {
+                        Some(r) => r,
+                        None => crate::data::ensure_mounted(&d).ok_or_else(|| format!("{d} : montage impossible")),
+                    };
+                    let r = dir.and_then(|p| crate::filemanager::open(&cfg, &p).map(|how| (p, how)));
+                    match r {
+                        Ok((p, how)) => dl_log!(info, "files", "dossier ouvert", "drive" => d, "path" => p.display(), "with" => how),
+                        Err(e) => {
+                            let _ = tx.send(Event::Error(d, e));
+                        }
+                    }
+                });
+            }
+            "eject" | "open-tray" | "close-tray" => {
+                if !dev.starts_with("/dev/sr") {
+                    return false;
+                }
+                let tx = self.tx.clone();
+                let d = dev.to_string();
+                let key = key.to_string();
+                std::thread::spawn(move || {
+                    let r = if key == "close-tray" {
+                        cdrom::close_tray(&d)
+                    } else {
+                        if crate::device::find_mount_point(&d).is_some() {
+                            if let Err(e) = crate::dbus::udisks_unmount(&d) {
+                                dl_log!(warn, "eject", format!("démontage impossible : {e}"), "drive" => d);
+                            }
+                        }
+                        cdrom::eject(&d)
+                    };
+                    match r {
+                        Ok(()) => dl_log!(info, "eject", "tiroir actionné", "drive" => d, "action" => key),
+                        Err(e) => {
+                            let _ = tx.send(Event::Error(d.clone(), format!("{} : {e}", t(&key))));
+                        }
+                    }
+                    // État du tiroir à jour sans attendre le sondage.
+                    let _ = tx.send(Event::Media(d));
+                });
+            }
+            "mount" | "unmount" | "safe-remove" => {
+                let Some(v) = self.drives.get(dev).and_then(|d| d.usb.clone()) else { return false };
+                let tx = self.tx.clone();
+                let key = key.to_string();
+                std::thread::spawn(move || {
+                    let mounted = crate::device::find_mount_point(&v.dev).is_some();
+                    let r = match key.as_str() {
+                        "mount" => crate::dbus::udisks_mount(&v.dev).map(|_| ()),
+                        "unmount" => crate::dbus::udisks_unmount(&v.dev),
+                        _ => (if mounted { crate::dbus::udisks_unmount(&v.dev) } else { Ok(()) }).and_then(|_| crate::dbus::udisks_power_off(&v.dev)),
+                    };
+                    match r {
+                        Ok(()) => dl_log!(info, "usb", "action effectuée", "device" => v.dev, "action" => key),
+                        Err(e) => {
+                            let _ = tx.send(Event::Error(v.dev.clone(), format!("{} : {e}", t(&key))));
+                        }
+                    }
+                });
+            }
+            _ => return false,
+        }
+        true
+    }
+
     /// Exécute une action sur le disque d'un lecteur.
     fn perform(&mut self, dev: &str, key: &str) {
+        if self.perform_device(dev, key) {
+            return;
+        }
         let Some(o) = self.drive(dev).offer.clone() else { return };
         let ident = self.drive(dev).ident.clone();
         self.drive(dev).state = DState::Idle;
@@ -1145,61 +1416,6 @@ impl Daemon {
                     let _ = std::fs::remove_dir_all(jobs::job_dir(j));
                 }
             }
-            "open-files" => {
-                let cfg = self.cfg.clone();
-                let tx = self.tx.clone();
-                let d = dev.to_string();
-                let known = self.files_dir(dev);
-                std::thread::spawn(move || {
-                    let dir = match known {
-                        Some(r) => r,
-                        None => crate::data::ensure_mounted(&d).ok_or_else(|| format!("{d} : montage impossible")),
-                    };
-                    let r = dir.and_then(|p| crate::filemanager::open(&cfg, &p).map(|how| (p, how)));
-                    match r {
-                        Ok((p, how)) => dl_log!(info, "files", "dossier ouvert", "drive" => d, "path" => p.display(), "with" => how),
-                        Err(e) => {
-                            let _ = tx.send(Event::Error(d, e));
-                        }
-                    }
-                });
-            }
-            "eject" => {
-                let tx = self.tx.clone();
-                let d = dev.to_string();
-                std::thread::spawn(move || {
-                    if crate::device::find_mount_point(&d).is_some() {
-                        if let Err(e) = crate::dbus::udisks_unmount(&d) {
-                            dl_log!(warn, "eject", format!("démontage impossible : {e}"), "drive" => d);
-                        }
-                    }
-                    match cdrom::eject(&d) {
-                        Ok(()) => dl_log!(info, "eject", "disque éjecté", "drive" => d),
-                        Err(e) => {
-                            let _ = tx.send(Event::Error(d, format!("{} : {e}", t("eject"))));
-                        }
-                    }
-                });
-            }
-            "mount" | "unmount" | "safe-remove" => {
-                let Some(v) = self.drive(dev).usb.clone() else { return };
-                let tx = self.tx.clone();
-                let key = key.to_string();
-                std::thread::spawn(move || {
-                    let mounted = crate::device::find_mount_point(&v.dev).is_some();
-                    let r = match key.as_str() {
-                        "mount" => crate::dbus::udisks_mount(&v.dev).map(|_| ()),
-                        "unmount" => crate::dbus::udisks_unmount(&v.dev),
-                        _ => (if mounted { crate::dbus::udisks_unmount(&v.dev) } else { Ok(()) }).and_then(|_| crate::dbus::udisks_power_off(&v.dev)),
-                    };
-                    match r {
-                        Ok(()) => dl_log!(info, "usb", "action effectuée", "device" => v.dev, "action" => key),
-                        Err(e) => {
-                            let _ = tx.send(Event::Error(v.dev.clone(), format!("{} : {e}", t(&key))));
-                        }
-                    }
-                });
-            }
             _ => {}
         }
     }
@@ -1210,6 +1426,26 @@ impl Daemon {
         if let Some(nt) = &self.notifier {
             let n = Notification { replaces, summary: t("job-failed").into(), body: msg.into(), icon: "dialog-error".into(), urgency: 1, timeout_ms: -1, ..Default::default() };
             nt.show(n);
+        }
+    }
+
+    /// Fin d'une tâche liée à un lecteur : le lecteur redevient libre.
+    fn job_released(&mut self, dev: &str, id: &str) {
+        if dev.is_empty() || self.drives.get(dev).map_or(true, |d| d.job.as_deref() != Some(id)) {
+            return;
+        }
+        let d = self.drive(dev);
+        d.job = None;
+        d.state = DState::Idle;
+        // Le disque a pu être éjecté pendant la tâche (les changements de
+        // média sont ignorés pendant un dump) : relire l'état du lecteur, sans
+        // nouvelle proposition.
+        if dev.starts_with("/dev/sr") {
+            d.gen += 1;
+            d.state = DState::Settling;
+            d.silent = true;
+            d.due = Some(Instant::now());
+            d.settle_until = Some(Instant::now() + Duration::from_secs(5));
         }
     }
 
@@ -1231,11 +1467,12 @@ impl Daemon {
         if self.notifier.is_none() {
             if finished {
                 self.active_jobs.retain(|x| x != id);
-                if !dev.is_empty() && self.drive(&dev).job.as_deref() == Some(id) {
-                    self.drive(&dev).job = None;
-                    self.drive(&dev).state = DState::Idle;
-                }
+                self.job_released(&dev, id);
             }
+            return;
+        }
+        // Fenêtre : la progression y est affichée ; seule la fin est notifiée.
+        if !finished && self.use_panel() {
             return;
         }
         let replaces = self.job_notif.get(id).copied().unwrap_or(0);
@@ -1268,17 +1505,13 @@ impl Daemon {
             }
         } else {
             self.active_jobs.retain(|x| x != id);
-            if !dev.is_empty() {
-                let d = self.drive(&dev);
-                if d.job.as_deref() == Some(id) {
-                    d.job = None;
-                    d.state = DState::Idle;
-                }
-            }
+            self.job_released(&dev, id);
             match status.as_str() {
                 "done" => {
                     let path = st["result"]["path"].str_or("").to_string();
                     let ver = match st["result"]["verified"].as_str() {
+                        // Vérification d'un fichier : intégrité seulement (chdman verify…).
+                        Some("ok") if plan["kind"].as_str() == Some("verify") => format!("\n✓ {}", t("integrity-ok")),
                         Some("ok") => format!("\n✓ {}", t("verified-ok")),
                         Some("mismatch") => format!("\n⚠ {}", t("verified-mismatch")),
                         _ => String::new(),
@@ -1294,7 +1527,12 @@ impl Daemon {
                         play_existing(&self.cfg, st["result"]["system"].str_or(plan["system"].str_or("")), &play_path(&path), None, naming::Resolution::from_value(&plan["resolution"]).as_ref());
                     }
                     let shown = Path::new(&path).strip_prefix(self.cfg.roms_dir()).map(|p| p.display().to_string()).unwrap_or(path.clone());
-                    Notification { replaces, summary: format!("{} : {title}", if plan["cart"].bool_or(false) { t("job-copy-done") } else { t("job-done") }), body: format!("{shown}{ver}{extra}"), icon: "media-optical".into(), actions, resident: false, progress: None, urgency: 1, timeout_ms: -1 }
+                    let done = match plan["kind"].as_str() {
+                        Some("verify") => t("verify-done"),
+                        _ if plan["cart"].bool_or(false) => t("job-copy-done"),
+                        _ => t("job-done"),
+                    };
+                    Notification { replaces, summary: format!("{done} : {title}"), body: format!("{shown}{ver}{extra}"), icon: "media-optical".into(), actions, resident: false, progress: None, urgency: 1, timeout_ms: -1 }
                 }
                 "cancelled" => Notification { replaces, summary: format!("{} : {title}", t("job-cancelled")), body: String::new(), icon: "media-optical".into(), timeout_ms: 5000, ..Default::default() },
                 "interrupted" => Notification { replaces, summary: format!("{} : {title}", t("job-interrupted")), body: st["message"].str_or("").into(), icon: "dialog-warning".into(), timeout_ms: -1, ..Default::default() },
@@ -1399,13 +1637,19 @@ pub fn usb_offer(v: &crate::usb::Volume) -> Offer {
     let mounted = v.mount.is_some() || crate::device::find_mount_point(&v.dev).is_some();
     let mut actions = vec![("open-files".to_string(), t("open-files").to_string())];
     if !v.dev.starts_with("usb:") {
-        actions.push(if mounted { ("unmount".into(), t("unmount").into()) } else { ("mount".into(), t("mount").into()) });
-        actions.push(("safe-remove".into(), t("safe-remove").into()));
+        // Démonté : rien à faire avant de le retirer (indication, pas d'action).
+        if mounted {
+            actions.push(("unmount".into(), t("unmount").into()));
+            actions.push(("safe-remove".into(), t("safe-remove").into()));
+        } else {
+            actions.push(("mount".into(), t("mount").into()));
+        }
     }
     let size = if v.size > 0 { format!(" ({})", crate::usb::human_size(v.size)) } else { String::new() };
+    let model = if v.model.is_empty() || v.label.is_empty() { String::new() } else { format!("{} · ", v.model) };
     let where_ = match &v.mount {
-        Some(m) => format!("{} {}", t("mounted-on"), m.display()),
-        None => t("not-mounted").to_string(),
+        Some(m) => format!("{model}{} {}", t("mounted-on"), m.display()),
+        None => format!("{model}{} {}", t("not-mounted"), t("safe-to-remove")),
     };
     Offer {
         handler: "usb".into(),

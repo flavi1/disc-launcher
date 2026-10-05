@@ -43,6 +43,7 @@ pub const R_OK: c_int = 4;
 
 // Ioctl CD-ROM (linux/cdrom.h)
 pub const CDROMEJECT: c_ulong = 0x5309;
+pub const CDROMCLOSETRAY: c_ulong = 0x5319;
 pub const CDROM_MEDIA_CHANGED: c_ulong = 0x5325;
 pub const CDROM_DRIVE_STATUS: c_ulong = 0x5326;
 pub const CDROM_DISC_STATUS: c_ulong = 0x5327;
@@ -295,6 +296,17 @@ pub fn free_space(path: &Path) -> io::Result<u64> {
     }
     let frsize = if buf[1] != 0 { buf[1] } else { buf[0] };
     Ok(buf[4].saturating_mul(frsize))
+}
+
+/// (taille totale, espace disponible) du système de fichiers de `path`.
+pub fn fs_usage(path: &Path) -> io::Result<(u64, u64)> {
+    let c = cpath(path)?;
+    let mut buf = [0u64; 16];
+    if unsafe { statvfs(c.as_ptr(), buf.as_mut_ptr() as *mut c_void) } != 0 {
+        return Err(last_err());
+    }
+    let frsize = if buf[1] != 0 { buf[1] } else { buf[0] };
+    Ok((buf[2].saturating_mul(frsize), buf[4].saturating_mul(frsize)))
 }
 
 pub fn can_access(path: &Path, mode: c_int) -> bool {

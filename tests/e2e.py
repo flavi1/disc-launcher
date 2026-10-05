@@ -256,37 +256,69 @@ check(d2.returncode == 0, "démon : instance unique")
 d.send_signal(signal.SIGTERM)
 d.wait(timeout=10)
 
-# 5b. Icône de la zone de notification (StatusNotifierItem + dbusmenu) sur un
-# bus de session privé, clé USB simulée, ouverture dans le gestionnaire de fichiers.
+# 5b. Fenêtre « Disques et périphériques » (protocole de disc-launcher-panel,
+# ici un faux panneau) et icône StatusNotifierItem sur un bus de session privé,
+# avec une clé USB simulée et un faux gestionnaire de fichiers.
 if shutil.which("dbus-daemon") and shutil.which("gdbus"):
     bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1"], stdout=subprocess.PIPE, text=True)
     addr = bus.stdout.readline().strip()
     usbdir = os.path.join(ROOT, "usb")
     os.makedirs(usbdir)
+    states = os.path.join(ROOT, "panel-states")
     write(os.path.join(FAKE, "fm"), f"#!/bin/sh\necho \"$@\" > {ROOT}/fm-opened\n", 0o755)
-    write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nfile_manager = ["{FAKE}/fm"]\n')
+    write(os.path.join(FAKE, "fake-panel"), f"""#!/usr/bin/env python3
+import json, sys
+print("ready", flush=True)
+clicked = False
+with open({states!r}, "a") as log:
+    for line in sys.stdin:
+        log.write(line); log.flush()
+        st = json.loads(line)
+        usb = [i for i in st["items"] if i["id"].startswith("usb:")]
+        if usb and st["visible"] and not clicked:
+            clicked = True
+            print("action\\t" + usb[0]["id"] + "\\topen-files", flush=True)
+""", 0o755)
+    write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nfile_manager = ["{FAKE}/fm"]\n[ui]\npanel_command = ["{FAKE}/fake-panel"]\n')
     tenv = dict(ENV, DBUS_SESSION_BUS_ADDRESS=addr, DISC_LAUNCHER_USB_DIRS=f"MA_CLE={usbdir}")
     d = subprocess.Popen([os.path.join(BIN, "disc-launcherd"), "--foreground"], env=tenv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     def gd(*a):
         return subprocess.run(["gdbus", "call", "--session", *a], env=tenv, capture_output=True, text=True).stdout
-    name, layout = None, ""
+    def last_state():
+        try:
+            lines = open(states).read().splitlines()
+            return json.loads(lines[-1]) if lines else None
+        except FileNotFoundError:
+            return None
+    st = None
+    for _ in range(50):
+        st = last_state()
+        if st and any(i["id"].startswith("usb:") for i in st["items"]):
+            break
+        time.sleep(0.2)
+    usb = [i for i in (st or {}).get("items", []) if i["id"].startswith("usb:")]
+    check(bool(usb) and usb[0]["title"].startswith("Volume USB — MA_CLE") and usb[0]["usage"] and "libres sur" in usb[0]["usage"]["text"], "fenêtre : volume USB avec barre d'espace libre")
+    check(st is not None and st["visible"] is False, "fenêtre : volume présent au démarrage → pas d'ouverture spontanée")
+    name = None
     for _ in range(50):
         m = re.search(r"org\.kde\.StatusNotifierItem-\d+-1", gd("--dest", "org.freedesktop.DBus", "--object-path", "/", "--method", "org.freedesktop.DBus.ListNames"))
         if m:
             name = m.group(0)
-            layout = gd("--dest", name, "--object-path", "/MenuBar", "--method", "com.canonical.dbusmenu.GetLayout", "--", "0", "-1", "@as []")
-            if "MA__CLE" in layout:
-                break
+            break
         time.sleep(0.2)
-    check(name is not None and "MA__CLE" in layout and "children-display" in layout, "icône : menu dbusmenu avec la clé USB")
     props = gd("--dest", name or "x", "--object-path", "/StatusNotifierItem", "--method", "org.freedesktop.DBus.Properties.GetAll", "org.kde.StatusNotifierItem")
-    check("'Status': <'Active'>" in props and "objectpath '/MenuBar'" in props, "icône : propriétés StatusNotifierItem")
-    gd("--dest", name or "x", "--object-path", "/MenuBar", "--method", "com.canonical.dbusmenu.Event", "--", "2", "clicked", "<0>", "0")
+    check("'IconName': <'media-eject'>" in props and "'Status': <'Active'>" in props and "'ItemIsMenu': <false>" in props, "icône : StatusNotifierItem « media-eject », active, sans menu")
+    gd("--dest", name or "x", "--object-path", "/StatusNotifierItem", "--method", "org.kde.StatusNotifierItem.Activate", "--", "0", "0")
     for _ in range(30):
         if os.path.exists(os.path.join(ROOT, "fm-opened")):
             break
         time.sleep(0.1)
-    check(os.path.exists(os.path.join(ROOT, "fm-opened")) and open(os.path.join(ROOT, "fm-opened")).read().strip() == usbdir, "icône : clic sur « Ouvrir » → gestionnaire de fichiers")
+    check(os.path.exists(os.path.join(ROOT, "fm-opened")) and open(os.path.join(ROOT, "fm-opened")).read().strip() == usbdir, "clic sur l'icône → fenêtre affichée ; « Ouvrir » → gestionnaire de fichiers")
+    time.sleep(0.8)
+    check(last_state()["visible"] is False, "fenêtre : refermée après une action")
+    gd("--dest", name or "x", "--object-path", "/StatusNotifierItem", "--method", "org.kde.StatusNotifierItem.ContextMenu", "--", "0", "0")
+    time.sleep(0.8)
+    check(last_state()["visible"] is True, "clic droit sur l'icône → fenêtre réaffichée")
     d.send_signal(signal.SIGTERM)
     d.wait(timeout=10)
     bus.terminate()

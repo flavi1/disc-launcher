@@ -5,10 +5,10 @@ Quand un disque optique est inséré, disc-launcher l'identifie et propose quoi 
 - **Médias :** un CD audio, un DVD ou un Blu-ray vidéo est **lu** avec le lecteur multimédia de votre choix (Kodi, mpv, VLC…).
 - **Jeux :** un jeu de console est **lancé** dans son émulateur, ou **dumpé** dans `~/ROMs/<système>/` avec les noms de dossiers d'ES-DE.
 - **Disques de fichiers :** un disque ne contenant que de la musique (FLAC, MP3…), que de la vidéo (MKV, DivX…) ou des photos d'appareil (dossier `DCIM`) est lu ou affiché.
-- **Clés USB :** une clé ou une carte mémoire s'ouvre dans le gestionnaire de fichiers, se monte, se démonte ou se retire en toute sécurité (la Retrode, qui se présente aussi comme une clé, n'est pas confondue).
+- **Volumes USB :** une clé, un disque dur USB ou une carte mémoire s'ouvre dans le gestionnaire de fichiers, se monte, se démonte ou se retire en toute sécurité, avec l'espace libre affiché (la Retrode, qui se présente aussi comme une clé, n'est pas confondue).
 - **Cartouches :** avec une **Retrode**, la cartouche insérée (Nintendo 64, Super Nintendo, Mega Drive, Game Boy, Game Boy Color, Game Boy Advance, Master System, Game Gear) est identifiée sans être dumpée, puis jouée depuis `~/ROMs` (dumpée au besoin).
 
-Le nom du fichier final est prédit avant toute lecture. Si le jeu est déjà dans la collection, même renommé ou déplacé, l'action proposée devient « Lancer la copie ». Un autre disque de données propose de s'ouvrir dans le gestionnaire de fichiers (les CD-ROM de jeux PC, reconnus à leur `AUTORUN.INF` ou `SETUP.EXE`, ne déclenchent pas de notification par défaut : voir `[handlers.windows] allow_heuristic` et `[policy] windows` ; ils restent dans le menu de l'icône). Tout disque optique peut être **éjecté** depuis sa proposition.
+Le nom du fichier final est prédit avant toute lecture. Si le jeu est déjà dans la collection, même renommé ou déplacé, l'action proposée devient « Lancer la copie ». Un autre disque de données propose de s'ouvrir dans le gestionnaire de fichiers (les CD-ROM de jeux PC, reconnus à leur `AUTORUN.INF` ou `SETUP.EXE`, n'ouvrent pas la fenêtre par défaut : voir `[handlers.windows] allow_heuristic` et `[policy] windows` ; ils y restent listés). Tout disque optique peut être **éjecté**, et le plateau d'un lecteur vide s'ouvre ou se referme depuis la fenêtre.
 
 Dépôt : <https://github.com/flavi1/disc-launcher>. Contrat et exemples des gestionnaires : [docs/handlers.md](docs/handlers.md).
 
@@ -16,7 +16,7 @@ Dépôt : <https://github.com/flavi1/disc-launcher>. Contrat et exemples des ges
 
 - **Peu de dépendances.** Rust et sa bibliothèque standard, plus libsqlite3, appelée directement. Les formats JSON, TOML et XML ainsi que le protocole D-Bus sont implémentés dans le projet.
 - **Indépendant du système d'init.** systemd n'est pas nécessaire : la supervision des tâches et les journaux sont gérés en interne, et le démon démarre par XDG Autostart. Des exemples pour systemd, OpenRC, runit et s6 sont fournis dans `contrib/`.
-- **Indépendant du bureau.** Les propositions passent par les notifications freedesktop, avec des boutons d'action. Sans serveur de notifications compatible, kdialog, zenity ou yad prennent le relais (une seule boîte pour tous les périphériques). Une icône de la zone de notification regroupe tout (voir « Icône et propositions »).
+- **Indépendant du bureau.** Une seule fenêtre, « Disques et périphériques », regroupe tous les disques, cartouches, volumes et tâches ; l'icône de la zone de notification l'affiche ou la masque (voir « Fenêtre et icône »). GTK 3 y est chargé à l'exécution, sans dépendance de compilation. Sans GTK 3 ni affichage, les propositions passent par les notifications freedesktop avec boutons d'action, puis par kdialog, zenity ou yad.
 - **Indépendant des applications.** Les émulateurs et les lecteurs multimédias ne sont que des réglages. Chaque système ou média peut être confié à un exécutable de votre choix (voir « Gestionnaires »).
 
 ## Compilation et installation
@@ -177,35 +177,40 @@ Les ROM N64 sont ramenées au format `.z64` quel que soit l'ordre d'octets produ
 
 L'émulateur par défaut est RetroArch : Mupen64Plus-Next pour les ROM N64, **Dolphin pour les WAD** (`existing_wad` du manifeste), Snes9x, Genesis Plus GX, Gambatte, mGBA. `[handlers.n64] emulator = "mupen64plus"` ou `program = "…"` en change ; pour lancer les jeux exactement comme ES-DE, [es-de-launch](https://github.com/flavi1/es-de-launch) se branche par l'adaptateur fourni `disc-launcher-es-de-launch` (voir [docs/handlers.md](docs/handlers.md#lancer-les-jeux-comme-es-de--es-de-launch)).
 
-## Clés USB
+## Volumes USB
 
-Les disques `sd*` amovibles ou reliés au bus USB sont sondés toutes les deux secondes (sysfs, base d'udev, sinon udisks2), partition par partition. Chaque volume formaté reçoit une proposition « Clé USB — étiquette (taille) » :
+Les disques `sd*` amovibles ou reliés au bus USB (clés, disques durs, cartes mémoire) sont sondés toutes les deux secondes (sysfs, base d'udev, sinon udisks2), partition par partition. Chaque volume formaté apparaît comme « Volume USB — étiquette (taille) », avec une barre d'espace libre quand il est monté :
 
 - **Ouvrir dans le gestionnaire de fichiers** (monte au besoin) ;
-- **Monter** ou **Démonter**, selon l'état ;
-- **Retirer en toute sécurité** : démontage puis mise hors tension (udisks2).
+- monté : **Démonter**, et **Retirer en toute sécurité** (icône d'éjection : démontage puis mise hors tension, par udisks2) ;
+- démonté : **Monter**, et l'indication « Vous pouvez retirer ce périphérique en toute sécurité ».
 
-La Retrode est écartée (étiquette `RETRODE`, fichier `RETRODE.CFG` ou modèle USB). `[policy] usb = "ignore"` supprime la notification à l'insertion ; la clé reste dans le menu de l'icône.
+La Retrode est écartée (étiquette `RETRODE`, fichier `RETRODE.CFG` ou modèle USB). `[policy] usb = "ignore"` évite l'ouverture de la fenêtre au branchement ; le volume y reste listé.
 
 ## Gestionnaire de fichiers
 
-« Ouvrir dans le gestionnaire de fichiers » est proposé pour les disques de données, les disques de fichiers (musique, vidéo, `DCIM`), les DVD et Blu-ray vidéo, la Retrode et les clés USB. Le disque est d'abord monté par udisks2 s'il ne l'est pas. Le gestionnaire est choisi ainsi :
+« Ouvrir dans le gestionnaire de fichiers » est proposé pour les disques de données, les disques de fichiers (musique, vidéo, `DCIM`), les DVD et Blu-ray vidéo, la Retrode et les volumes USB. Le disque est d'abord monté par udisks2 s'il ne l'est pas. Le gestionnaire est choisi ainsi :
 
 1. `[general] file_manager = ["dolphin"]` s'il est réglé ;
 2. `xdg-open`, qui suit l'association XDG du bureau (`inode/directory`) ;
 3. l'interface D-Bus `org.freedesktop.FileManager1` ;
 4. le premier présent parmi dolphin, nautilus, nemo, caja, thunar, pcmanfm-qt, pcmanfm.
 
-## Icône et propositions
+## Fenêtre et icône
 
-Choisir une action ferme **toutes** les propositions affichées (notifications et boîte de dialogue), quel que soit le nombre de disques, cartouches et clés présents. Elles restent accessibles par l'**icône de la zone de notification** :
+La fenêtre **« Disques et périphériques »** (`disc-launcher-panel`) liste, à la manière du notificateur de Plasma :
 
-- **clic gauche** : réaffiche les propositions, ou les masque si elles sont affichées. Exemple : « Lire avec Kodi », puis on quitte Kodi et un clic sur l'icône rouvre la proposition du disque ;
-- **clic droit** : un menu unique, à la manière de « Disques et périphériques » de Plasma, avec chaque disque, cartouche et clé suivi de ses actions, puis les tâches en cours (avec « Annuler »).
+- chaque **lecteur optique**, même vide : son disque et ses actions, ou son état (« vide » avec « Ouvrir le plateau », « plateau ouvert » avec « Fermer le plateau », « lecture du disque… ») ; l'icône d'éjection est à droite du titre ;
+- les **cartouches** de la Retrode et les **volumes USB** (barre d'espace libre) ;
+- les **tâches** en cours (dump, vérification, conversion), avec leur progression et « Annuler ».
 
-L'icône suit la norme StatusNotifierItem (menu `com.canonical.dbusmenu`), sans bibliothèque graphique. Elle s'affiche sous KDE Plasma, LXQt, Xfce (greffon « Zone de notification » ou « Status Notifier Plugin »), Cinnamon, MATE (applet Ayatana), Budgie, et sous GNOME avec l'extension « AppIndicator and KStatusNotifierItem Support » (installée d'office par Ubuntu). **LXDE** (lxpanel) et GNOME sans extension n'affichent pas ces icônes : les notifications et `disc-launcher status` restent disponibles. Sans périphérique, l'icône passe à l'état « passif » (rangée dans les icônes masquées). `[tray] enabled = false` la désactive.
+Elle s'ouvre à l'insertion d'un disque, d'une cartouche ou d'un volume, et se ferme dès qu'une action est choisie. L'**icône de la zone de notification** (icône d'éjection) l'affiche ou la masque, d'un clic gauche ou droit. Exemple : « Lire avec Kodi », puis on quitte Kodi et un clic sur l'icône rouvre la fenêtre. Une éjection faite hors de disc-launcher (bouton du lecteur) est prise en compte en deux secondes au plus. Les fins de tâche restent signalées par une notification.
 
-Réinsérer un disque, même le même, rouvre toujours sa proposition.
+La fenêtre utilise GTK 3, chargé à l'exécution : présent sur presque tous les bureaux (sous Plasma, le thème Breeze GTK lui donne l'apparence de KDE). Sans GTK 3 ou sans affichage, les propositions passent par les notifications, puis par kdialog, zenity ou yad ; `[ui] panel = "notifications"` force ce mode.
+
+L'icône suit la norme StatusNotifierItem, sans bibliothèque graphique. Elle s'affiche sous KDE Plasma, LXQt, Xfce (greffon « Zone de notification » ou « Status Notifier Plugin »), Cinnamon, MATE (applet Ayatana), Budgie, et sous GNOME avec l'extension « AppIndicator and KStatusNotifierItem Support » (installée d'office par Ubuntu). **LXDE** (lxpanel) et GNOME sans extension n'affichent pas ces icônes ; la fenêtre s'ouvre tout de même à chaque insertion. Sans disque ni volume, l'icône passe à l'état « passif » (rangée parmi les icônes masquées). `[tray] enabled = false` la désactive.
+
+Réinsérer un disque, même le même, rouvre toujours la fenêtre.
 
 ## Gestionnaires
 
@@ -374,7 +379,7 @@ disc-identify --image jeu.cue            classificateur seul (JSON)
 - la prédiction et la vérification de noms avec un DAT ;
 - une tâche complète, avec des outils simulés, jusqu'au placement dans `Jeu.m3u/` ;
 - l'index SQLite et la détection d'un renommage ;
-- le démon, l'icône (menu dbusmenu sur un bus de session privé) et une clé USB simulée ;
+- le démon, la fenêtre (protocole, avec un faux panneau), l'icône sur un bus de session privé et une clé USB simulée ;
 - les lecteurs multimédias et les variables `DL_*` ;
 - le lecteur Kodi face à un faux serveur JSON-RPC ;
 - la chaîne de résolution des exécutables et la détection de cœur RetroArch.
@@ -392,8 +397,9 @@ disc-identify --image jeu.cue            classificateur seul (JSON)
 src/sys.rs sqlite.rs        appels système ; liaison libsqlite3
 src/json.rs toml.rs xml.rs  formats
 src/dbus.rs                 client et service D-Bus (notifications, logind, udisks2)
-src/tray.rs                 icône StatusNotifierItem et menu dbusmenu
-src/usb.rs filemanager.rs   clés USB ; ouverture dans le gestionnaire de fichiers
+src/tray.rs panel.rs        icône StatusNotifierItem ; pilotage de la fenêtre
+src/bin/disc-launcher-panel.rs   fenêtre « Disques et périphériques » (GTK 3 chargé à l'exécution)
+src/usb.rs filemanager.rs   volumes USB ; ouverture dans le gestionnaire de fichiers
 src/device/                 lecteur réel (SG_IO), images .iso/.cue, source mémoire
 src/fs/                     ISO 9660, XDVDFS, dossier monté
 src/identify/               classificateur : TOC, signatures déclaratives, sondes, profils

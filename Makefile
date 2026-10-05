@@ -22,7 +22,7 @@ POLKITRULESDIR   ?= /etc/polkit-1/rules.d
 GROUP       ?= disc-launcher
 TARGET      := target/release
 
-BINS := disc-launcherd disc-launcher disc-identify disc-launcher-job \
+BINS := disc-launcherd disc-launcher disc-identify disc-launcher-job disc-launcher-panel \
         disc-launcher-generic disc-launcher-media-generic disc-launcher-data-generic disc-launcher-retroarch \
         disc-launcher-player-kodi disc-launcher-resolve-serials
 
