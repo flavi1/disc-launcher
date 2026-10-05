@@ -45,6 +45,13 @@ panel = "auto"
 # Autre programme respectant le même protocole (voir disc-launcher-panel)
 # panel_command = []
 
+# Actions personnalisées, ajoutées aux propositions (voir le README) :
+# [actions.rip-cd]
+# label = "Ripper le CD audio"
+# handlers = ["cdda"]
+# command = 'encbd "$DL_DEVICE" ~/Musique'
+# terminal = true
+
 [tray]
 # Icône de la zone de notification (StatusNotifierItem) : un clic affiche ou
 # masque la fenêtre.

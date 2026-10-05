@@ -212,6 +212,25 @@ L'icône suit la norme StatusNotifierItem, sans bibliothèque graphique. Elle s'
 
 Réinsérer un disque, même le même, rouvre toujours la fenêtre.
 
+## Actions personnalisées
+
+Toute commande peut devenir une action de plus dans la fenêtre (ou les notifications), pour les disques ou volumes choisis :
+
+```toml
+# ~/.config/disc-launcher/config.toml
+[actions.rip-cd]
+label = "Ripper le CD audio"
+handlers = ["cdda"]                         # gestionnaires concernés ; "*" = tous
+command = 'encbd "$DL_DEVICE" ~/Musique'    # chaîne : exécutée par sh -c
+terminal = true                             # suivre la commande dans un terminal
+```
+
+- `handlers` : identifiants de gestionnaires (`cdda`, `dvd-video`, `psx`…), plus `data` (disque de données) et `usb` (volume USB) ; `disc-launcher identify` affiche l'identifiant d'un disque.
+- `command` en **chaîne** : exécutée par `sh -c` avec les variables `DL_*` des gestionnaires (`DL_DEVICE`, `DL_MOUNT`, `DL_LABEL`, `DL_EXISTING`, `DL_NAME`, `DL_SYSTEM`…, voir [docs/handlers.md](docs/handlers.md)) ; `~` y est développé par le shell.
+- `command` en **liste** : arguments avec les gabarits `{device}`, `{mount}`, `{existing}`, `{label}`, `{name}`, `{handler}`, `{roms}` (et `~` en début d'argument), sans shell.
+- La commande est lancée détachée ; sa sortie va dans `~/.local/state/disc-launcher/log/action-<nom>.log`, ou s'affiche dans un terminal avec `terminal = true`.
+- Elle s'essaie sans la fenêtre : `disc-launcher run custom:rip-cd /dev/sr0`.
+
 ## Gestionnaires
 
 Chaque système (`psx`, `gc`…) et chaque média (`cdda`, `dvd-video`…) est servi par un exécutable. La première règle qui s'applique désigne celui-ci :

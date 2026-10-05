@@ -22,6 +22,7 @@ pub mod identity;
 
 pub mod cart;
 pub mod collection;
+pub mod custom;
 pub mod data;
 pub mod filemanager;
 pub mod generic;
