@@ -13,7 +13,6 @@ use crate::notify::{self, t, Notification, Notifier, NotifyEvent};
 use crate::refdb::RefDb;
 use crate::{jobj, jobs, paths, sys};
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -149,19 +148,19 @@ pub fn run(foreground: bool) -> i32 {
         dl_log!(info, "daemon", "mode natif-seul : le démon ne fait rien");
         return 0;
     }
-    // Instance unique : verrou sur le dossier d'exécution.
-    let rt = paths::runtime_dir();
-    let lock = match File::create(rt.join("instance.lock")) {
-        Ok(f) => f,
+    // Instance unique par utilisateur, quel que soit XDG_RUNTIME_DIR (un démon
+    // lancé depuis un terminal et celui de la session ne doivent pas coexister).
+    let lock = match sys::instance_lock("disc-launcherd") {
+        Ok(Some(l)) => l,
+        Ok(None) => {
+            dl_log!(info, "daemon", "une autre instance tourne déjà");
+            return 0;
+        }
         Err(e) => {
             dl_log!(error, "daemon", format!("verrou d'instance : {e}"));
             return 1;
         }
     };
-    if !sys::try_lock(lock.as_raw_fd(), true).unwrap_or(false) {
-        dl_log!(info, "daemon", "une autre instance tourne déjà");
-        return 0;
-    }
     sys::install_signal_flags();
     let (tx, rx) = mpsc::channel::<Event>();
 
@@ -527,6 +526,9 @@ impl Daemon {
             }
         }
         use std::os::unix::process::CommandExt;
+        // La fenêtre appartient à cette instance : la fermer (et la réclamer)
+        // avant de se remplacer, sinon elle reste orpheline.
+        self.panel = None;
         let err = std::process::Command::new(&path).args(std::env::args_os().skip(1)).exec();
         dl_log!(error, "daemon", format!("relance impossible : {err}"));
     }

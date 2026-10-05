@@ -263,6 +263,28 @@ pub fn unlock(fd: RawFd) {
     }
 }
 
+/// Le processus reçoit `sig` à la mort de son parent (PR_SET_PDEATHSIG).
+pub fn set_parent_death_signal(sig: c_int) {
+    const PR_SET_PDEATHSIG: c_int = 1;
+    unsafe {
+        prctl(PR_SET_PDEATHSIG, sig as c_ulong, 0, 0, 0);
+    }
+}
+
+/// Verrou d'instance par utilisateur, indépendant de tout dossier : socket
+/// Unix de l'espace de noms abstrait `@<nom>-<uid>`, libérée par le noyau à la
+/// mort du processus (ou à un `exec`, le descripteur étant CLOEXEC). Ok(None)
+/// si une autre instance la détient.
+pub fn instance_lock(name: &str) -> io::Result<Option<std::os::unix::net::UnixListener>> {
+    use std::os::linux::net::SocketAddrExt;
+    let addr = std::os::unix::net::SocketAddr::from_abstract_name(format!("{name}-{}", uid()).as_bytes())?;
+    match std::os::unix::net::UnixListener::bind_addr(&addr) {
+        Ok(l) => Ok(Some(l)),
+        Err(e) if e.kind() == io::ErrorKind::AddrInUse => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 pub fn uid() -> u32 {
     unsafe { getuid() }
 }
