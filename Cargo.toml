@@ -1,6 +1,6 @@
 [package]
 name = "disc-launcher"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 description = "Détecte les disques optiques insérés et propose de les lire ou de les dumper (lecteurs multimédias, émulateurs, ~/ROMs façon ES-DE)"
 license = "GPL-3.0-or-later"

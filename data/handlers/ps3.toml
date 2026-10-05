@@ -34,6 +34,7 @@ media = ["bd"]
 name = "read"
 command = ["redumper", "disc", "--drive={sgdevice}", "--image-path={tmp}", "--image-name={stem}"]
 helper = true
+helper_profile = "redumper-disc"
 progress = "redumper"
 
 # Outils et syntaxes à vérifier selon votre installation.

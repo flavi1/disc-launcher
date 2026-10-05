@@ -1,21 +1,25 @@
-//! Assistant privilégié (section 11).
+//! Assistant privilégié.
 //!
 //! Lancé par `pkexec` (action polkit `io.github.flavi1.disclauncher.dump`), il
-//! vérifie la demande puis exécute un outil de dump **sous l'identité de
-//! l'utilisateur**, avec la seule capacité ambiante CAP_SYS_RAWIO (commandes
-//! SCSI constructeur : OmniDrive, Kreon, Friidump).
+//! construit lui-même la commande d'un **profil d'invocation** (redumper,
+//! friidump…) et l'exécute **sous l'identité de l'utilisateur**, avec la seule
+//! capacité ambiante CAP_SYS_RAWIO (commandes SCSI constructeur : OmniDrive,
+//! Kreon, Friidump). La tâche ne transmet qu'un nom de profil, le lecteur, le
+//! dossier de sortie, un nom de fichier et des options prévues par le profil.
 //!
-//! Usage : disc-launcher-helper run --tool <nom> --device /dev/srN --out <dossier> -- <arguments…>
+//! Usage : disc-launcher-helper run --profile <nom> --device /dev/srN --out <dossier> --name <fichier> [-- <options…>]
 //!
-//! Configuration (root uniquement) : /etc/disc-launcher/helper-tools.toml
+//! Profils : intégrés (voir `helper_profiles.rs`), complétés ou remplacés par
+//! /etc/disc-launcher/helper-tools.toml (appartenant à root).
 
-use disclauncher::{sys, toml};
+use disclauncher::{helper_profiles, sys};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const CONFIG: &str = "/etc/disc-launcher/helper-tools.toml";
+const USAGE: &str = "usage : disc-launcher-helper run --profile <nom> --device /dev/srN --out <dossier> --name <fichier> [-- <options…>]";
 
 fn die(msg: &str) -> ! {
     eprintln!("disc-launcher-helper : {msg}");
@@ -49,35 +53,27 @@ fn user_gid_home(uid: u32) -> (u32, String, Option<String>) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(|s| s.as_str()) != Some("run") {
-        die("usage : disc-launcher-helper run --tool <nom> --device /dev/srN --out <dossier> -- <arguments…>");
+        die(USAGE);
     }
-    let mut tool = None;
-    let mut device = None;
-    let mut out = None;
-    let mut rest: Vec<String> = vec![];
+    let (mut profile, mut device, mut out, mut name) = (None, None, None, None);
+    let mut options: Vec<String> = vec![];
     let mut i = 2;
     while i < args.len() {
+        let val = || args.get(i + 1).cloned();
         match args[i].as_str() {
-            "--tool" => {
-                tool = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--device" => {
-                device = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--out" => {
-                out = args.get(i + 1).cloned();
-                i += 2;
-            }
+            "--profile" => profile = val(),
+            "--device" => device = val(),
+            "--out" => out = val(),
+            "--name" => name = val(),
             "--" => {
-                rest = args[i + 1..].to_vec();
+                options = args[i + 1..].to_vec();
                 break;
             }
-            a => die(&format!("argument inattendu : {a}")),
+            a => die(&format!("argument inattendu : {a}\n{USAGE}")),
         }
+        i += 2;
     }
-    let (Some(tool), Some(device), Some(out)) = (tool, device, out) else { die("--tool, --device et --out sont obligatoires") };
+    let (Some(profile), Some(device), Some(out), Some(name)) = (profile, device, out, name) else { die(USAGE) };
 
     if sys::euid() != 0 {
         die("doit être lancé par pkexec (root)");
@@ -87,7 +83,7 @@ fn main() {
         die("l'utilisateur appelant ne peut pas être root");
     }
 
-    // Périphérique : /dev/srN, périphérique bloc.
+    // Lecteur : /dev/srN, périphérique bloc ; /dev/sgN déduit par le noyau (sysfs).
     let dname = device.strip_prefix("/dev/sr").unwrap_or("");
     if dname.is_empty() || !dname.chars().all(|c| c.is_ascii_digit()) {
         die("périphérique refusé (attendu /dev/srN)");
@@ -96,12 +92,9 @@ fn main() {
         Ok(m) if m.file_type().is_block_device() => {}
         _ => die("le périphérique n'est pas un périphérique bloc"),
     }
+    let sgdevice = disclauncher::device::sg_of(&device).unwrap_or_else(|| device.clone());
 
     // Dossier de sortie : dossier réel appartenant à l'utilisateur.
-    // Le périphérique SCSI générique du même lecteur est accepté aussi (redumper).
-    let sg = disclauncher::device::sg_of(&device);
-    let same_drive = |v: &str| v == device || sg.as_deref() == Some(v);
-
     let outp = PathBuf::from(&out);
     match std::fs::symlink_metadata(&outp) {
         Ok(m) if m.is_dir() && m.uid() == uid => {}
@@ -109,79 +102,34 @@ fn main() {
     }
     let outp = std::fs::canonicalize(&outp).unwrap_or_else(|_| die("dossier de sortie introuvable"));
 
-    // Outil autorisé.
-    if !root_owned_safe(Path::new(CONFIG)) {
-        die("configuration absente ou non protégée : /etc/disc-launcher/helper-tools.toml");
-    }
-    let cfg = toml::parse(&std::fs::read_to_string(CONFIG).unwrap_or_default()).unwrap_or_else(|e| die(&e.to_string()));
-    let t = cfg.get("tools").get(&tool);
-    if t.is_null() {
-        die(&format!("outil non autorisé : {tool}"));
-    }
-    // « path » : un chemin, ou une liste dont le premier existant est retenu.
-    let candidates: Vec<String> = match t["path"].as_str() {
-        Some(p) => vec![p.to_string()],
-        None => t["path"].strings(),
+    // Profil : intégré, ou défini par root dans helper-tools.toml.
+    let extra = if Path::new(CONFIG).exists() {
+        if !root_owned_safe(Path::new(CONFIG)) {
+            die(&format!("{CONFIG} doit appartenir à root et n'être modifiable par personne d'autre"));
+        }
+        Some(std::fs::read_to_string(CONFIG).unwrap_or_else(|e| die(&format!("{CONFIG} : {e}"))))
+    } else {
+        None
     };
-    if candidates.is_empty() {
-        die("chemin de l'outil manquant");
+    let all = helper_profiles::load(extra.as_deref()).unwrap_or_else(|e| die(&e));
+    let p = all["profiles"].get(&profile);
+    if p.is_null() {
+        die(&format!("profil inconnu : {profile}"));
     }
-    let Some(found) = candidates.iter().find(|p| Path::new(p).exists()) else {
-        die(&format!("{tool} introuvable aux chemins autorisés ({}) : corrigez {CONFIG}", candidates.join(", ")));
+    let candidates = helper_profiles::paths(p);
+    let Some(found) = candidates.iter().find(|c| Path::new(c).exists()) else {
+        die(&format!("programme du profil {profile} introuvable ({}) : installez-le ou corrigez {CONFIG}", candidates.join(", ")));
     };
     let path = PathBuf::from(found);
     if !path.is_absolute() || !root_owned_safe(&path) {
-        die("l'outil doit être un chemin absolu appartenant à root, non modifiable par d'autres");
+        die(&format!("{} doit être un chemin absolu appartenant à root, non modifiable par d'autres", path.display()));
     }
-    let allowed = t["allowed_args"].strings();
-    let path_opts = t["path_args"].strings();
-    let device_opts = t["device_args"].strings();
-    // Options suivies d'une valeur séparée : { "-d" = "device", "-i" = "path" }
-    let value_args = t["value_args"].clone();
-    let check_path = |v: &str, a: &str| {
-        let vp = PathBuf::from(v);
-        let canon = std::fs::canonicalize(&vp).unwrap_or_else(|_| vp.parent().and_then(|p| std::fs::canonicalize(p).ok()).map(|p| p.join(vp.file_name().unwrap_or_default())).unwrap_or(vp.clone()));
-        if !canon.starts_with(&outp) {
-            die(&format!("chemin hors du dossier de sortie : {a}"));
-        }
-    };
-    let mut k = 0;
-    while k < rest.len() {
-        let a = &rest[k];
-        if let Some(kind) = value_args.get(a).as_str() {
-            let v = rest.get(k + 1).unwrap_or_else(|| die(&format!("valeur manquante après {a}")));
-            match kind {
-                "device" if !same_drive(v) => die(&format!("périphérique différent de --device : {v}")),
-                "path" => check_path(v, v),
-                "device" => {}
-                _ => die("value_args : type inconnu"),
-            }
-            k += 2;
-            continue;
-        }
-        let ok_token = allowed.iter().any(|x| if x.ends_with('=') { a.starts_with(x.as_str()) } else { a == x });
-        if !ok_token {
-            die(&format!("argument non autorisé : {a}"));
-        }
-        for p in &path_opts {
-            if let Some(v) = a.strip_prefix(p.as_str()) {
-                check_path(v, a);
-            }
-        }
-        for d in &device_opts {
-            if let Some(v) = a.strip_prefix(d.as_str()) {
-                if !same_drive(v) {
-                    die(&format!("périphérique différent de --device : {a}"));
-                }
-            }
-        }
-        k += 1;
-    }
+    let argv = helper_profiles::build(p, &device, &sgdevice, &outp.to_string_lossy(), &name, &options).unwrap_or_else(|e| die(&e));
 
     let (gid, home, user) = user_gid_home(uid);
     if let Err(e) = sys::drop_to_user_keep_rawio(uid, gid, user.as_deref()) {
         die(&format!("abandon des privilèges impossible : {e}"));
     }
-    let err = Command::new(&path).args(&rest).current_dir(&outp).env_clear().env("PATH", "/usr/local/bin:/usr/bin:/bin").env("HOME", home).env("LANG", "C.UTF-8").exec();
+    let err = Command::new(&path).args(&argv).current_dir(&outp).env_clear().env("PATH", "/usr/local/bin:/usr/bin:/bin").env("HOME", home).env("LANG", "C.UTF-8").exec();
     die(&format!("exécution de {} : {err}", path.display()));
 }

@@ -13,13 +13,13 @@ tags = ["console:megadrive"]
 regional_folders = { USA = "genesis", default = "megadrive" }
 
 [formats]
-target = "md"
-accepted = ["md", "bin", "gen", "smd", "zip", "7z"]
+target = "mdx"
+accepted = ["mdx", "md", "bin", "gen", "smd", "zip", "7z"]
 multidisc = false
 
 [dump]
-verify = ["{stem}.md"]
-outputs = ["{stem}.md"]
+verify = ["{stem}.mdx"]
+outputs = ["{stem}.mdx"]
 
 [[dump.plan]]
 name = "copie"
@@ -27,7 +27,7 @@ media = ["cart"]
 
 [[dump.plan.step]]
 name = "copy"
-command = ["disc-launcher", "rom", "copy", "{device}", "{tmp}/{stem}.md"]
+command = ["disc-launcher", "rom", "copy", "{device}", "{tmp}/{stem}.mdx"]
 progress = "none"
 
 [resolvers]

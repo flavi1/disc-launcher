@@ -10,11 +10,12 @@
     <message>Authentication is required to read this disc with vendor-specific commands</message>
     <message xml:lang="fr">Une authentification est nécessaire pour lire ce disque avec des commandes constructeur</message>
     <defaults>
+      <!-- Mot de passe administrateur, mémorisé quelques minutes. Les membres
+           du groupe « disc-launcher » en sont dispensés par la règle
+           /etc/polkit-1/rules.d/50-disc-launcher.rules. -->
       <allow_any>no</allow_any>
-      <allow_inactive>no</allow_inactive>
-      <!-- Utilisateur local de la session active : sans mot de passe.
-           Remplacez par auth_admin_keep pour exiger une authentification. -->
-      <allow_active>yes</allow_active>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">@LIBEXECDIR@/disc-launcher/disc-launcher-helper</annotate>
   </action>

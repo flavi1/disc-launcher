@@ -241,37 +241,43 @@ fn helper_path() -> Option<PathBuf> {
     paths::which("disc-launcher-helper")
 }
 
-/// Transforme une étape `helper = true` en appel `pkexec disc-launcher-helper`.
-fn wrap_helper(cmd: &[String], plan: &Value, mode: &str) -> Result<Vec<String>, String> {
+/// Transforme une étape `helper = true` en appel `pkexec disc-launcher-helper`
+/// par profil d'invocation : seuls le profil, le lecteur, le dossier de
+/// sortie, le nom de fichier et les options prévues par le profil sont transmis.
+fn wrap_helper(cmd: &[String], step: &Value, plan: &Value, mode: &str) -> Result<Vec<String>, String> {
     if mode == "none" || sys::euid() == 0 {
         return Ok(cmd.to_vec());
     }
+    let Some(profile) = step["helper_profile"].as_str() else {
+        return Err(format!("étape « {} » : helper = true sans helper_profile", step["name"].str_or("?")));
+    };
     let pk = paths::which("pkexec");
     let helper = helper_path();
     match (pk, helper) {
         (Some(pk), Some(h)) => {
-            // Contrôle préalable (le fichier est lisible par tous) : un outil absent
-            // de la liste ou introuvable à ses chemins autorisés ferait échouer
-            // l'assistant après la demande de mot de passe.
+            // Contrôle préalable (profils lisibles par tous) : un programme
+            // introuvable ferait échouer l'assistant après la demande de mot de passe.
             let conf = paths::sysconf_dir().join("helper-tools.toml");
-            if let Ok(text) = std::fs::read_to_string(&conf) {
-                if let Ok(v) = crate::toml::parse(&text) {
-                    let t = v.get("tools").get(&cmd[0]);
-                    if t.is_null() {
-                        return Err(format!("{} n'est pas autorisé dans {}", cmd[0], conf.display()));
-                    }
-                    let cands: Vec<String> = match t["path"].as_str() {
-                        Some(p) => vec![p.to_string()],
-                        None => t["path"].strings(),
-                    };
-                    if !cands.iter().any(|p| Path::new(p).exists()) {
-                        let found = paths::which(&cmd[0]).map(|p| format!(" ; il est installé ici : {}", p.display())).unwrap_or_default();
-                        return Err(format!("{} introuvable aux chemins autorisés par {} ({}){found}", cmd[0], conf.display(), cands.join(", ")));
-                    }
-                }
+            let extra = std::fs::read_to_string(&conf).ok();
+            let all = crate::helper_profiles::load(extra.as_deref())?;
+            let p = all["profiles"].get(profile);
+            if p.is_null() {
+                return Err(format!("profil d'assistant inconnu : {profile}"));
             }
-            let mut v = vec![pk.to_string_lossy().into_owned(), h.to_string_lossy().into_owned(), "run".into(), "--tool".into(), cmd[0].clone(), "--device".into(), plan["device"].str_or("").into(), "--out".into(), plan["tmp"].str_or("").into(), "--".into()];
-            v.extend_from_slice(&cmd[1..]);
+            let cands = crate::helper_profiles::paths(p);
+            if !cands.iter().any(|c| Path::new(c).exists()) {
+                let found = paths::which(&cmd[0]).map(|p| format!(" ; il est installé ici : {} (ajoutez ce chemin au profil dans {})", p.display(), conf.display())).unwrap_or_default();
+                return Err(format!("{} introuvable aux chemins du profil {profile} ({}){found}", cmd[0], cands.join(", ")));
+            }
+            let mut v = vec![
+                pk.to_string_lossy().into_owned(), h.to_string_lossy().into_owned(), "run".into(),
+                "--profile".into(), profile.into(),
+                "--device".into(), plan["device"].str_or("").into(),
+                "--out".into(), plan["tmp"].str_or("").into(),
+                "--name".into(), step["helper_name"].str_or(plan["stem"].str_or("disc")).into(),
+                "--".into(),
+            ];
+            v.extend(step["helper_options"].strings());
             Ok(v)
         }
         _ if mode == "pkexec" => Err("pkexec ou disc-launcher-helper introuvable".into()),
@@ -550,7 +556,7 @@ fn execute(r: &mut Runner, cfg: &Config) -> Result<Value, String> {
             }
         }
         if s["helper"].bool_or(false) {
-            cmd = wrap_helper(&cmd, &plan, &helper_mode)?;
+            cmd = wrap_helper(&cmd, s, &plan, &helper_mode)?;
         }
         run_command(r, &cmd, &tmp, i, total, s["progress"].str_or("generic"))?;
         let is_read = s["helper"].bool_or(false) || name == "read";

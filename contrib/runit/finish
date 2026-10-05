@@ -1,3 +1,0 @@
-#!/bin/sh
-# Pause avant relance si le démon s'est arrêté en erreur (fin de session).
-[ "$1" = 0 ] || sleep 5
