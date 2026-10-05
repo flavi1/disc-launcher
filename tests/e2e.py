@@ -14,7 +14,7 @@ Simule redumper et chdman par des scripts, puis vérifie :
 
 Usage : python3 tests/e2e.py [target/debug|target/release]
 """
-import hashlib, json, os, shutil, signal, sqlite3, subprocess, sys, tempfile, time
+import hashlib, json, os, re, shutil, signal, sqlite3, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "target/debug"))
@@ -226,7 +226,7 @@ for _ in range(60):
         break
     time.sleep(0.2)
 check(seen is not None and "console:n64" in json.dumps(seen["identification"]) and "Mario Kart 64 (Europe)" in json.dumps(seen["offer"]), "démon : cartouche Retrode détectée, identifiée, proposée")
-check(seen["offer"]["actions"] == ["play-existing", "redump"] and seen["offer"]["situation"]["path"].endswith("Mario Kart 64 (Europe).z64"), "démon : cartouche déjà dumpée → Jouer la copie / Re-dumper")
+check(seen["offer"]["actions"] == ["play-existing", "redump", "open-files"] and seen["offer"]["situation"]["path"].endswith("Mario Kart 64 (Europe).z64"), "démon : cartouche déjà dumpée → Jouer la copie / Re-dumper / Ouvrir")
 # Version WAD (console virtuelle Wii) d'une autre région : prioritaire pour « Jouer »
 wad = os.path.join(csys, "Mario Kart 64 (USA) (Virtual Console).wad")
 open(wad, "wb").write(b"WAD")
@@ -255,6 +255,43 @@ d2 = subprocess.run([os.path.join(BIN, "disc-launcherd")], env=ENV, capture_outp
 check(d2.returncode == 0, "démon : instance unique")
 d.send_signal(signal.SIGTERM)
 d.wait(timeout=10)
+
+# 5b. Icône de la zone de notification (StatusNotifierItem + dbusmenu) sur un
+# bus de session privé, clé USB simulée, ouverture dans le gestionnaire de fichiers.
+if shutil.which("dbus-daemon") and shutil.which("gdbus"):
+    bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1"], stdout=subprocess.PIPE, text=True)
+    addr = bus.stdout.readline().strip()
+    usbdir = os.path.join(ROOT, "usb")
+    os.makedirs(usbdir)
+    write(os.path.join(FAKE, "fm"), f"#!/bin/sh\necho \"$@\" > {ROOT}/fm-opened\n", 0o755)
+    write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nfile_manager = ["{FAKE}/fm"]\n')
+    tenv = dict(ENV, DBUS_SESSION_BUS_ADDRESS=addr, DISC_LAUNCHER_USB_DIRS=f"MA_CLE={usbdir}")
+    d = subprocess.Popen([os.path.join(BIN, "disc-launcherd"), "--foreground"], env=tenv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    def gd(*a):
+        return subprocess.run(["gdbus", "call", "--session", *a], env=tenv, capture_output=True, text=True).stdout
+    name, layout = None, ""
+    for _ in range(50):
+        m = re.search(r"org\.kde\.StatusNotifierItem-\d+-1", gd("--dest", "org.freedesktop.DBus", "--object-path", "/", "--method", "org.freedesktop.DBus.ListNames"))
+        if m:
+            name = m.group(0)
+            layout = gd("--dest", name, "--object-path", "/MenuBar", "--method", "com.canonical.dbusmenu.GetLayout", "--", "0", "-1", "@as []")
+            if "MA__CLE" in layout:
+                break
+        time.sleep(0.2)
+    check(name is not None and "MA__CLE" in layout and "children-display" in layout, "icône : menu dbusmenu avec la clé USB")
+    props = gd("--dest", name or "x", "--object-path", "/StatusNotifierItem", "--method", "org.freedesktop.DBus.Properties.GetAll", "org.kde.StatusNotifierItem")
+    check("'Status': <'Active'>" in props and "objectpath '/MenuBar'" in props, "icône : propriétés StatusNotifierItem")
+    gd("--dest", name or "x", "--object-path", "/MenuBar", "--method", "com.canonical.dbusmenu.Event", "--", "2", "clicked", "<0>", "0")
+    for _ in range(30):
+        if os.path.exists(os.path.join(ROOT, "fm-opened")):
+            break
+        time.sleep(0.1)
+    check(os.path.exists(os.path.join(ROOT, "fm-opened")) and open(os.path.join(ROOT, "fm-opened")).read().strip() == usbdir, "icône : clic sur « Ouvrir » → gestionnaire de fichiers")
+    d.send_signal(signal.SIGTERM)
+    d.wait(timeout=10)
+    bus.terminate()
+    os.remove(os.path.join(HOME, ".config/disc-launcher/config.toml"))
+
 dlog = open(os.path.join(state_dir, "log", "daemon.log")).read()
 check("msg=démarrage" in dlog and "msg=arrêt" in dlog and "msg=capabilities" in dlog, "démon : journal interne (démarrage, capacités, arrêt)")
 

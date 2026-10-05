@@ -23,6 +23,7 @@ pub mod identity;
 pub mod cart;
 pub mod collection;
 pub mod data;
+pub mod filemanager;
 pub mod generic;
 pub mod handlers;
 pub mod helper_profiles;
@@ -32,11 +33,13 @@ pub mod naming;
 pub mod refdb;
 pub mod retroarch;
 pub mod sqlite;
+pub mod usb;
 
 pub mod control;
 pub mod daemon;
 pub mod dbus;
 pub mod notify;
 pub mod terminal;
+pub mod tray;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
