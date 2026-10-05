@@ -28,7 +28,22 @@ pub fn t(key: &str) -> &'static str {
         "dump" => "Dumper", "Dump";
         "redump" => "Re-dumper", "Re-dump";
         "dump-then-play" => "Dumper puis jouer", "Dump then play";
-        "verify" => "Vérifier", "Verify";
+        "verify" => "Vérifier la ROM", "Verify ROM";
+        "eject" => "Éjecter", "Eject";
+        "open-files" => "Ouvrir dans le gestionnaire de fichiers", "Open in file manager";
+        "mount" => "Monter", "Mount";
+        "unmount" => "Démonter", "Unmount";
+        "safe-remove" => "Retirer en toute sécurité", "Safely remove";
+        "usb-key" => "Clé USB", "USB drive";
+        "data-disc" => "Disque de données", "Data disc";
+        "retrode" => "Retrode", "Retrode";
+        "mounted-on" => "Monté sur", "Mounted on";
+        "not-mounted" => "Non monté", "Not mounted";
+        "tray-empty" => "Aucun disque ni périphérique", "No disc or device";
+        "tray-show" => "Afficher les propositions", "Show offers";
+        "tray-hide" => "Masquer les propositions", "Hide offers";
+        "tray-jobs" => "Tâches en cours", "Running tasks";
+        "w-refdb-empty" => "Base de référence vide pour ce système : nom provisoire. Corriger : disc-launcher refdb fetch", "Reference database empty for this system: provisional name. Fix: disc-launcher refdb fetch";
         "convert" => "Convertir", "Convert";
         "complete-game" => "Dumper ce disque", "Dump this disc";
         "play-game" => "Lancer le jeu", "Play the game";
@@ -287,8 +302,9 @@ pub fn dialog_tool() -> Option<&'static str> {
     order.iter().copied().find(|t| crate::paths::which(t).is_some())
 }
 
-/// Boîte de choix bloquante ; renvoie la clé choisie.
-pub fn dialog_choose(title: &str, text: &str, actions: &[(String, String)]) -> Option<String> {
+/// Boîte de choix bloquante ; renvoie la clé choisie. `on_spawn` reçoit le
+/// PID de la boîte, pour pouvoir la fermer de l'extérieur.
+pub fn dialog_choose(title: &str, text: &str, actions: &[(String, String)], on_spawn: impl FnOnce(u32)) -> Option<String> {
     let tool = dialog_tool()?;
     let mut c = Command::new(tool);
     match tool {
@@ -308,7 +324,10 @@ pub fn dialog_choose(title: &str, text: &str, actions: &[(String, String)]) -> O
             }
         }
     }
-    let out = c.output().ok()?;
+    c.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    let child = c.spawn().ok()?;
+    on_spawn(child.id());
+    let out = child.wait_with_output().ok()?;
     if !out.status.success() {
         return None;
     }

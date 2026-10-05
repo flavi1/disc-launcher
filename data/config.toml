@@ -33,6 +33,16 @@ terminal = true
 # x-terminal-emulator, puis konsole, gnome-terminal, xfce4-terminal…).
 # terminal_command = ["konsole", "--hold", "-e"]
 terminal_command = []
+# Gestionnaire de fichiers (« Ouvrir dans le gestionnaire de fichiers »). Vide :
+# xdg-open, puis org.freedesktop.FileManager1, puis détection.
+# file_manager = ["dolphin"]
+file_manager = []
+
+[tray]
+# Icône de la zone de notification (StatusNotifierItem) : clic gauche pour
+# afficher ou masquer les propositions, clic droit pour le menu de tous les
+# disques, cartouches et clés USB.
+enabled = true
 
 [collection]
 # Au démarrage du démon, parcourir ~/ROMs en arrière-plan, sans lire le
@@ -64,6 +74,9 @@ default = "ask"
 dos = "ignore"
 windows = "ignore"
 photo-cd = "ignore"
+# Disques de données, clés USB (notification à l'insertion)
+# data = "ignore"
+# usb = "ignore"
 # media = "auto-play"
 # psx = "dump-then-play"
 

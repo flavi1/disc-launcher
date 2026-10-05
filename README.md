@@ -5,9 +5,10 @@ Quand un disque optique est inséré, disc-launcher l'identifie et propose quoi 
 - **Médias :** un CD audio, un DVD ou un Blu-ray vidéo est **lu** avec le lecteur multimédia de votre choix (Kodi, mpv, VLC…).
 - **Jeux :** un jeu de console est **lancé** dans son émulateur, ou **dumpé** dans `~/ROMs/<système>/` avec les noms de dossiers d'ES-DE.
 - **Disques de fichiers :** un disque ne contenant que de la musique (FLAC, MP3…), que de la vidéo (MKV, DivX…) ou des photos d'appareil (dossier `DCIM`) est lu ou affiché.
+- **Clés USB :** une clé ou une carte mémoire s'ouvre dans le gestionnaire de fichiers, se monte, se démonte ou se retire en toute sécurité (la Retrode, qui se présente aussi comme une clé, n'est pas confondue).
 - **Cartouches :** avec une **Retrode**, la cartouche insérée (Nintendo 64, Super Nintendo, Mega Drive, Game Boy, Game Boy Color, Game Boy Advance, Master System, Game Gear) est identifiée sans être dumpée, puis jouée depuis `~/ROMs` (dumpée au besoin).
 
-Le nom du fichier final est prédit avant toute lecture. Si le jeu est déjà dans la collection, même renommé ou déplacé, l'action proposée devient « Lancer la copie ». Un autre disque de données ne déclenche aucune proposition (les CD-ROM de jeux PC, reconnus à leur `AUTORUN.INF` ou `SETUP.EXE`, sont ignorés par défaut : voir `[handlers.windows] allow_heuristic` et `[policy] windows`).
+Le nom du fichier final est prédit avant toute lecture. Si le jeu est déjà dans la collection, même renommé ou déplacé, l'action proposée devient « Lancer la copie ». Un autre disque de données propose de s'ouvrir dans le gestionnaire de fichiers (les CD-ROM de jeux PC, reconnus à leur `AUTORUN.INF` ou `SETUP.EXE`, ne déclenchent pas de notification par défaut : voir `[handlers.windows] allow_heuristic` et `[policy] windows` ; ils restent dans le menu de l'icône). Tout disque optique peut être **éjecté** depuis sa proposition.
 
 Dépôt : <https://github.com/flavi1/disc-launcher>. Contrat et exemples des gestionnaires : [docs/handlers.md](docs/handlers.md).
 
@@ -15,7 +16,7 @@ Dépôt : <https://github.com/flavi1/disc-launcher>. Contrat et exemples des ges
 
 - **Peu de dépendances.** Rust et sa bibliothèque standard, plus libsqlite3, appelée directement. Les formats JSON, TOML et XML ainsi que le protocole D-Bus sont implémentés dans le projet.
 - **Indépendant du système d'init.** systemd n'est pas nécessaire : la supervision des tâches et les journaux sont gérés en interne, et le démon démarre par XDG Autostart. Des exemples pour systemd, OpenRC, runit et s6 sont fournis dans `contrib/`.
-- **Indépendant du bureau.** Les propositions passent par les notifications freedesktop, avec des boutons d'action. Sans serveur de notifications compatible, kdialog, zenity ou yad prennent le relais.
+- **Indépendant du bureau.** Les propositions passent par les notifications freedesktop, avec des boutons d'action. Sans serveur de notifications compatible, kdialog, zenity ou yad prennent le relais (une seule boîte pour tous les périphériques). Une icône de la zone de notification regroupe tout (voir « Icône et propositions »).
 - **Indépendant des applications.** Les émulateurs et les lecteurs multimédias ne sont que des réglages. Chaque système ou média peut être confié à un exécutable de votre choix (voir « Gestionnaires »).
 
 ## Compilation et installation
@@ -175,6 +176,36 @@ Avec `[filenameChksum] 1` dans `RETRODE.CFG`, la Retrode ajoute une somme de con
 Les ROM N64 sont ramenées au format `.z64` quel que soit l'ordre d'octets produit (`.n64`, `.v64`) ; l'en-tête de copieur SNES est retiré. Les ROM Mega Drive sont copiées en `.mdx` plutôt qu'en `.md`, pour éviter la confusion avec Markdown (`.md`, `.bin`, `.gen`, `.smd` restent reconnus). Systèmes : `n64`, `snes`, `megadrive`, `gb`, `gbc`, `gba`, `mastersystem`, `gamegear` (dossiers régionaux `sfc` et `genesis` comme ES-DE). Les extensions sont lues dans `RETRODE.CFG`. Les sauvegardes (`.srm`) ne sont pas copiées. `disc-launcher rom info <fichier>` analyse une ROM (en-tête, empreinte, nom) ; sur la Retrode, cela revient à la dumper.
 
 L'émulateur par défaut est RetroArch : Mupen64Plus-Next pour les ROM N64, **Dolphin pour les WAD** (`existing_wad` du manifeste), Snes9x, Genesis Plus GX, Gambatte, mGBA. `[handlers.n64] emulator = "mupen64plus"` ou `program = "…"` en change ; un lanceur qui choisit lui-même l'émulateur (ES-DE…) se branche comme gestionnaire (`[handlers.n64] executable = { play = "…" }`).
+
+## Clés USB
+
+Les disques `sd*` amovibles ou reliés au bus USB sont sondés toutes les deux secondes (sysfs, base d'udev, sinon udisks2), partition par partition. Chaque volume formaté reçoit une proposition « Clé USB — étiquette (taille) » :
+
+- **Ouvrir dans le gestionnaire de fichiers** (monte au besoin) ;
+- **Monter** ou **Démonter**, selon l'état ;
+- **Retirer en toute sécurité** : démontage puis mise hors tension (udisks2).
+
+La Retrode est écartée (étiquette `RETRODE`, fichier `RETRODE.CFG` ou modèle USB). `[policy] usb = "ignore"` supprime la notification à l'insertion ; la clé reste dans le menu de l'icône.
+
+## Gestionnaire de fichiers
+
+« Ouvrir dans le gestionnaire de fichiers » est proposé pour les disques de données, les disques de fichiers (musique, vidéo, `DCIM`), les DVD et Blu-ray vidéo, la Retrode et les clés USB. Le disque est d'abord monté par udisks2 s'il ne l'est pas. Le gestionnaire est choisi ainsi :
+
+1. `[general] file_manager = ["dolphin"]` s'il est réglé ;
+2. `xdg-open`, qui suit l'association XDG du bureau (`inode/directory`) ;
+3. l'interface D-Bus `org.freedesktop.FileManager1` ;
+4. le premier présent parmi dolphin, nautilus, nemo, caja, thunar, pcmanfm-qt, pcmanfm.
+
+## Icône et propositions
+
+Choisir une action ferme **toutes** les propositions affichées (notifications et boîte de dialogue), quel que soit le nombre de disques, cartouches et clés présents. Elles restent accessibles par l'**icône de la zone de notification** :
+
+- **clic gauche** : réaffiche les propositions, ou les masque si elles sont affichées. Exemple : « Lire avec Kodi », puis on quitte Kodi et un clic sur l'icône rouvre la proposition du disque ;
+- **clic droit** : un menu unique, à la manière de « Disques et périphériques » de Plasma, avec chaque disque, cartouche et clé suivi de ses actions, puis les tâches en cours (avec « Annuler »).
+
+L'icône suit la norme StatusNotifierItem (menu `com.canonical.dbusmenu`), sans bibliothèque graphique. Elle s'affiche sous KDE Plasma, LXQt, Xfce (greffon « Zone de notification » ou « Status Notifier Plugin »), Cinnamon, MATE (applet Ayatana), Budgie, et sous GNOME avec l'extension « AppIndicator and KStatusNotifierItem Support » (installée d'office par Ubuntu). **LXDE** (lxpanel) et GNOME sans extension n'affichent pas ces icônes : les notifications et `disc-launcher status` restent disponibles. Sans périphérique, l'icône passe à l'état « passif » (rangée dans les icônes masquées). `[tray] enabled = false` la désactive.
+
+Réinsérer un disque, même le même, rouvre toujours sa proposition.
 
 ## Gestionnaires
 
@@ -343,7 +374,7 @@ disc-identify --image jeu.cue            classificateur seul (JSON)
 - la prédiction et la vérification de noms avec un DAT ;
 - une tâche complète, avec des outils simulés, jusqu'au placement dans `Jeu.m3u/` ;
 - l'index SQLite et la détection d'un renommage ;
-- le démon ;
+- le démon, l'icône (menu dbusmenu sur un bus de session privé) et une clé USB simulée ;
 - les lecteurs multimédias et les variables `DL_*` ;
 - le lecteur Kodi face à un faux serveur JSON-RPC ;
 - la chaîne de résolution des exécutables et la détection de cœur RetroArch.
@@ -360,7 +391,9 @@ disc-identify --image jeu.cue            classificateur seul (JSON)
 ```text
 src/sys.rs sqlite.rs        appels système ; liaison libsqlite3
 src/json.rs toml.rs xml.rs  formats
-src/dbus.rs                 client D-Bus (notifications, logind, udisks2)
+src/dbus.rs                 client et service D-Bus (notifications, logind, udisks2)
+src/tray.rs                 icône StatusNotifierItem et menu dbusmenu
+src/usb.rs filemanager.rs   clés USB ; ouverture dans le gestionnaire de fichiers
 src/device/                 lecteur réel (SG_IO), images .iso/.cue, source mémoire
 src/fs/                     ISO 9660, XDVDFS, dossier monté
 src/identify/               classificateur : TOC, signatures déclaratives, sondes, profils

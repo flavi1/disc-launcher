@@ -59,6 +59,11 @@ fn unescape(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Dossier racine d'une Retrode montée (contient `RETRODE.CFG`) ?
+pub fn is_retrode_root(root: &Path) -> bool {
+    has_config(root)
+}
+
 fn has_config(root: &Path) -> bool {
     std::fs::read_dir(root).map(|it| it.flatten().any(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(CONFIG_FILE))).unwrap_or(false)
 }

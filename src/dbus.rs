@@ -371,6 +371,12 @@ fn encode(m: &Message) -> Vec<u8> {
     if let Some(x) = &m.member {
         f(3, DV::Str(x.clone()));
     }
+    if let Some(e) = &m.error_name {
+        f(4, DV::Str(e.clone()));
+    }
+    if let Some(r) = m.reply_serial {
+        f(5, DV::U32(r));
+    }
     if let Some(d) = &m.destination {
         f(6, DV::Str(d.clone()));
     }
@@ -539,7 +545,7 @@ impl Connection {
                 }
                 return Ok(m);
             }
-            if m.mtype == SIGNAL {
+            if m.mtype == SIGNAL || m.mtype == METHOD_CALL {
                 self.queue.push_back(m);
             } else {
                 for fd in &m.fds {
@@ -596,6 +602,35 @@ impl Connection {
                 Err(e) => return Err(e),
             }
         }
+    }
+
+    /// Prochain message quelconque (appel de méthode entrant, signal…).
+    pub fn next_message(&mut self, timeout: Duration) -> io::Result<Option<Message>> {
+        if let Some(m) = self.queue.pop_front() {
+            return Ok(Some(m));
+        }
+        self.read_message(timeout)
+    }
+
+    /// Réserve un nom de bus (`RequestName`, sans file d'attente).
+    pub fn request_name(&mut self, name: &str) -> io::Result<bool> {
+        let r = self.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "RequestName", vec![DV::str(name), DV::U32(4)], Duration::from_secs(5))?;
+        Ok(matches!(r.body.first().and_then(|v| v.as_u32()), Some(1) | Some(4)))
+    }
+
+    /// Réponse à un appel de méthode reçu.
+    pub fn reply(&mut self, to: &Message, body: Vec<DV>) -> io::Result<()> {
+        self.send(Message { mtype: METHOD_RETURN, reply_serial: Some(to.serial), destination: to.sender.clone(), body, ..Default::default() }).map(|_| ())
+    }
+
+    /// Réponse d'erreur à un appel de méthode reçu.
+    pub fn reply_error(&mut self, to: &Message, name: &str, text: &str) -> io::Result<()> {
+        self.send(Message { mtype: ERROR, reply_serial: Some(to.serial), destination: to.sender.clone(), error_name: Some(name.into()), body: vec![DV::str(text)], ..Default::default() }).map(|_| ())
+    }
+
+    /// Émet un signal.
+    pub fn emit(&mut self, path: &str, iface: &str, member: &str, body: Vec<DV>) -> io::Result<()> {
+        self.send(Message { mtype: SIGNAL, path: Some(path.into()), interface: Some(iface.into()), member: Some(member.into()), body, ..Default::default() }).map(|_| ())
     }
 
     /// Propriété via org.freedesktop.DBus.Properties.Get.
@@ -711,6 +746,31 @@ pub fn udisks_mount(dev: &str) -> io::Result<String> {
     let path = format!("/org/freedesktop/UDisks2/block_devices/{}", name.replace(|ch: char| !ch.is_ascii_alphanumeric(), "_"));
     let r = c.call("org.freedesktop.UDisks2", &path, "org.freedesktop.UDisks2.Filesystem", "Mount", vec![DV::empty_dict()], Duration::from_secs(30))?;
     Ok(r.body.first().and_then(|v| v.as_str()).unwrap_or("").to_string())
+}
+
+/// Chemin d'objet udisks2 d'un périphérique bloc (`/dev/sdb1` → …/block_devices/sdb1).
+pub fn udisks_block_path(dev: &str) -> String {
+    let name = dev.trim_start_matches("/dev/");
+    format!("/org/freedesktop/UDisks2/block_devices/{}", name.replace(|ch: char| !ch.is_ascii_alphanumeric(), "_"))
+}
+
+/// Propriété texte de l'interface Block d'udisks2 (`IdLabel`, `IdType`, `IdUsage`…).
+pub fn udisks_block_prop(dev: &str, prop: &str) -> Option<String> {
+    let mut c = Connection::open(Bus::System).ok()?;
+    let v = c.get_property("org.freedesktop.UDisks2", &udisks_block_path(dev), "org.freedesktop.UDisks2.Block", prop).ok()?;
+    v.as_str().map(|s| s.to_string())
+}
+
+/// Retrait sûr d'une clé : démontage (fait par l'appelant) puis mise hors
+/// tension du périphérique (Drive.PowerOff, ou Drive.Eject à défaut).
+pub fn udisks_power_off(dev: &str) -> io::Result<()> {
+    let mut c = Connection::open(Bus::System)?;
+    let drive = c.get_property("org.freedesktop.UDisks2", &udisks_block_path(dev), "org.freedesktop.UDisks2.Block", "Drive")?;
+    let drive = drive.as_str().filter(|s| *s != "/").ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "aucun lecteur udisks2 pour ce périphérique"))?.to_string();
+    match c.call("org.freedesktop.UDisks2", &drive, "org.freedesktop.UDisks2.Drive", "PowerOff", vec![DV::empty_dict()], Duration::from_secs(30)) {
+        Ok(_) => Ok(()),
+        Err(_) => c.call("org.freedesktop.UDisks2", &drive, "org.freedesktop.UDisks2.Drive", "Eject", vec![DV::empty_dict()], Duration::from_secs(30)).map(|_| ()),
+    }
 }
 
 #[cfg(test)]
