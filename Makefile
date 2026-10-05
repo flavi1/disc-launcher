@@ -45,6 +45,7 @@ built:
 install: built
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(LIBEXECDIR)/disc-launcher
 	for b in $(BINS); do install -m 755 $(TARGET)/$$b $(DESTDIR)$(BINDIR)/$$b; done
+	install -m 755 contrib/es-de-launch/disc-launcher-es-de-launch $(DESTDIR)$(BINDIR)/disc-launcher-es-de-launch
 	install -m 755 $(TARGET)/disc-launcher-helper $(DESTDIR)$(LIBEXECDIR)/disc-launcher/disc-launcher-helper
 	install -d $(DESTDIR)$(DATADIR)/disc-launcher/handlers/media $(DESTDIR)$(DATADIR)/disc-launcher/handlers/data $(DESTDIR)$(DATADIR)/disc-launcher/signatures
 	install -m 644 data/handlers/*.toml $(DESTDIR)$(DATADIR)/disc-launcher/handlers/
@@ -89,6 +90,7 @@ install-native:
 install-user: build
 	install -d $(HOME)/.local/bin $(HOME)/.local/share/disc-launcher/handlers/media $(HOME)/.local/share/disc-launcher/handlers/data $(HOME)/.local/share/disc-launcher/signatures $(HOME)/.config/autostart
 	for b in $(BINS); do install -m 755 $(TARGET)/$$b $(HOME)/.local/bin/$$b; done
+	install -m 755 contrib/es-de-launch/disc-launcher-es-de-launch $(HOME)/.local/bin/disc-launcher-es-de-launch
 	install -m 644 data/handlers/*.toml $(HOME)/.local/share/disc-launcher/handlers/
 	install -m 644 data/handlers/media/*.toml $(HOME)/.local/share/disc-launcher/handlers/media/
 	install -m 644 data/handlers/data/*.toml $(HOME)/.local/share/disc-launcher/handlers/data/
@@ -98,6 +100,7 @@ install-user: build
 
 uninstall:
 	for b in $(BINS); do rm -f $(DESTDIR)$(BINDIR)/$$b; done
+	rm -f $(DESTDIR)$(BINDIR)/disc-launcher-es-de-launch
 	rm -rf $(DESTDIR)$(LIBEXECDIR)/disc-launcher $(DESTDIR)$(DATADIR)/disc-launcher $(DESTDIR)$(DATADIR)/doc/disc-launcher
 	rm -f $(DESTDIR)$(SYSCONFDIR)/xdg/autostart/disc-launcherd.desktop
 	rm -f $(DESTDIR)$(DATADIR)/applications/disc-launcher.desktop $(DESTDIR)$(DATADIR)/applications/disc-launcher-play.desktop
