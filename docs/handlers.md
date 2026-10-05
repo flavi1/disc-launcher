@@ -281,27 +281,20 @@ echo '{}'
 
 Comme la lecture est confiée à un autre exécutable, le générique répond à `describe` en considérant la lecture disponible (variable `DL_PLAY_HANDLER`).
 
-### Un lanceur qui lit la configuration d'EmulationStation (esquisse)
+### Lancer les jeux comme ES-DE : es-de-launch
 
-Écrire un tel lanceur est un projet à part : il n'est pas fourni. Le système de gestionnaires lui offre déjà tout ce qu'il lui faut :
+[es-de-launch](https://github.com/flavi1/es-de-launch) lance un jeu exactement comme le menu d'ES-DE, à partir de son nom de fichier : même système, même émulateur (alternatifs choisis dans ES-DE compris), même commande, mêmes scripts `game-start` / `game-end`. Il se branche sur disc-launcher par un petit adaptateur fourni, `disc-launcher-es-de-launch` (installé par `make install`, source dans `contrib/es-de-launch/`) :
 
-- **Déclaration :** `[handlers.defaults] console = { play = "esde-launch", "*" = "disc-launcher-generic" }`.
-- **Données reçues :** `DL_SYSTEM`, qui est aussi le nom du dossier ES-DE, `DL_FOLDER`, `DL_EXISTING`, `DL_EXT` et `DL_ROMS_DIR`.
-- **Travail du lanceur :**
-  - lire `es_systems.xml` puis `es_find_rules.xml` ;
-  - choisir la `<command>` du système, celle par défaut ou l'alternative préférée ;
-  - remplacer `%ROM%`, `%EMULATOR_…%` et `%CORE_…%` ;
-  - lancer la commande.
-
-```python
-#!/usr/bin/env python3
-# esde-launch — esquisse
-import os, sys, subprocess, xml.etree.ElementTree as ET
-system, rom = os.environ["DL_SYSTEM"], os.environ["DL_EXISTING"]
-tree = ET.parse(os.path.expanduser("~/ES-DE/custom_systems/es_systems.xml"))  # ou le fichier fourni par ES-DE
-cmd = next(s.find("command").text for s in tree.iter("system") if s.findtext("name") == system)
-# … résoudre %EMULATOR_X% / %CORE_X% avec es_find_rules.xml, puis :
-cmd = cmd.replace("%ROM%", rom)
-subprocess.Popen(cmd, shell=True, start_new_session=True)
-print("{}")
+```toml
+# ~/.config/disc-launcher/config.toml
+[handlers.defaults]
+console = { play = "disc-launcher-es-de-launch", "*" = "disc-launcher-generic" }
 ```
+
+Toutes les copies présentes dans `~/ROMs` (disques de jeu dumpés et cartouches) sont alors lancées par `es-de-launch "<fichier>"`. L'adaptateur :
+
+- vérifie d'abord la commande (`es-de-launch --yes --output-cmd`) : un système ou un émulateur introuvable remonte comme erreur dans le journal de disc-launcher ;
+- lance `es-de-launch --yes "<fichier>"` détaché (es-de-launch attend la fin du jeu pour les scripts `game-end`), sa sortie allant dans `~/.local/state/disc-launcher/log/es-de-launch.log` ;
+- laisse au générique tout le reste : identification, dump, conversion, et lecture d'un disque physique encore absent de `~/ROMs`.
+
+Les réglages d'émulateur de disc-launcher (`[handlers.psx] emulator = …`) ne servent alors plus qu'à « Jouer le disque » ; un `[handlers.<id>] executable` explicite reste prioritaire sur `[handlers.defaults]`. Vérification : `disc-launcher handlers psx` doit afficher `play: disc-launcher-es-de-launch`.

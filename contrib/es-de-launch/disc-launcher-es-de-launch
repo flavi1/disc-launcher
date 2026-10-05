@@ -1,0 +1,48 @@
+#!/bin/sh
+# Gestionnaire disc-launcher : lance les jeux déjà présents dans ~/ROMs avec
+# es-de-launch (https://github.com/flavi1/es-de-launch), c'est-à-dire comme le
+# menu d'ES-DE : même émulateur (alternatifs compris), mêmes scripts
+# game-start / game-end.
+#
+# Installation :
+#   install -m 755 disc-launcher-es-de-launch ~/.local/bin/
+# puis, dans ~/.config/disc-launcher/config.toml :
+#   [handlers.defaults]
+#   console = { play = "disc-launcher-es-de-launch", "*" = "disc-launcher-generic" }
+#
+# Le reste (identification, dump, conversion, lecture d'un disque physique)
+# reste au gestionnaire générique.
+
+verb=$1
+[ $# -gt 0 ] && shift
+
+# Seul le verbe « play » est traité ici.
+[ "$verb" = play ] || exec disc-launcher-generic "$verb" --id "${DL_HANDLER:?}" "$@"
+
+# Lecture du disque physique (pas de copie dans ~/ROMs) : générique.
+[ -n "$DL_EXISTING" ] || exec disc-launcher-generic play --id "${DL_HANDLER:?}" "$@"
+
+json_escape() {
+    printf '%s' "$1" | tr '\n' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+if ! command -v es-de-launch >/dev/null 2>&1; then
+    printf '{"error":"es-de-launch introuvable dans le PATH"}\n'
+    exit 1
+fi
+
+# Vérification préalable, sans rien lancer : système et émulateur résolus ?
+# (--yes : jamais de question, un choix ambigu devient une erreur.)
+if ! err=$(es-de-launch --yes --output-cmd "$DL_EXISTING" 2>&1 >/dev/null); then
+    printf '{"error":"es-de-launch : %s"}\n' "$(json_escape "$err")"
+    exit 1
+fi
+
+# es-de-launch attend la fin du jeu (scripts game-end) : on le détache, sorties
+# vers un journal, pour rendre la main tout de suite à disc-launcher.
+log="${XDG_STATE_HOME:-$HOME/.local/state}/disc-launcher/log/es-de-launch.log"
+mkdir -p "$(dirname "$log")"
+printf '\n== %s %s\n' "$(date '+%F %T')" "$DL_EXISTING" >>"$log"
+setsid -f es-de-launch --yes "$DL_EXISTING" >>"$log" 2>&1 </dev/null
+
+printf '{"player":"es-de-launch"}\n'

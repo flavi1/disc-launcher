@@ -175,7 +175,7 @@ Avec `[filenameChksum] 1` dans `RETRODE.CFG`, la Retrode ajoute une somme de con
 
 Les ROM N64 sont ramenées au format `.z64` quel que soit l'ordre d'octets produit (`.n64`, `.v64`) ; l'en-tête de copieur SNES est retiré. Les ROM Mega Drive sont copiées en `.mdx` plutôt qu'en `.md`, pour éviter la confusion avec Markdown (`.md`, `.bin`, `.gen`, `.smd` restent reconnus). Systèmes : `n64`, `snes`, `megadrive`, `gb`, `gbc`, `gba`, `mastersystem`, `gamegear` (dossiers régionaux `sfc` et `genesis` comme ES-DE). Les extensions sont lues dans `RETRODE.CFG`. Les sauvegardes (`.srm`) ne sont pas copiées. `disc-launcher rom info <fichier>` analyse une ROM (en-tête, empreinte, nom) ; sur la Retrode, cela revient à la dumper.
 
-L'émulateur par défaut est RetroArch : Mupen64Plus-Next pour les ROM N64, **Dolphin pour les WAD** (`existing_wad` du manifeste), Snes9x, Genesis Plus GX, Gambatte, mGBA. `[handlers.n64] emulator = "mupen64plus"` ou `program = "…"` en change ; un lanceur qui choisit lui-même l'émulateur (ES-DE…) se branche comme gestionnaire (`[handlers.n64] executable = { play = "…" }`).
+L'émulateur par défaut est RetroArch : Mupen64Plus-Next pour les ROM N64, **Dolphin pour les WAD** (`existing_wad` du manifeste), Snes9x, Genesis Plus GX, Gambatte, mGBA. `[handlers.n64] emulator = "mupen64plus"` ou `program = "…"` en change ; pour lancer les jeux exactement comme ES-DE, [es-de-launch](https://github.com/flavi1/es-de-launch) se branche par l'adaptateur fourni `disc-launcher-es-de-launch` (voir [docs/handlers.md](docs/handlers.md#lancer-les-jeux-comme-es-de--es-de-launch)).
 
 ## Clés USB
 

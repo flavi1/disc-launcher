@@ -80,7 +80,8 @@ pub fn describe(m: &Manifest, cfg: &Config, input: &Value) -> Value {
         Some((n, e)) => {
             let ex = emulator_command(m, cfg, e, "existing");
             let di = emulator_command(m, cfg, e, "disc");
-            if !ex.is_empty() && !command_available(&ex) {
+            // Lecture confiée à un autre exécutable : l'émulateur par défaut n'est pas requis.
+            if !ex.is_empty() && !command_available(&ex) && std::env::var("DL_PLAY_HANDLER").is_err() {
                 missing.push(ex[0].clone());
             }
             (n.clone(), !ex.is_empty() && command_available(&ex), !di.is_empty() && command_available(&di))

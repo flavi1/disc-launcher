@@ -59,3 +59,7 @@ Copiez `runit/run` ou `s6/run` comme script `run` d'un service surveillé par
 un `runsvdir` ou un `s6-svscan` lancé **sous votre compte**, et exportez-y
 l'environnement graphique. Pour s6-rc, ajoutez un fichier `type` contenant
 `longrun`.
+
+## es-de-launch
+
+`es-de-launch/disc-launcher-es-de-launch` : gestionnaire qui lance les jeux de `~/ROMs` avec [es-de-launch](https://github.com/flavi1/es-de-launch), comme le menu d'ES-DE. Installé par `make install` ; inactif tant que la configuration ne le désigne pas (voir `docs/handlers.md`).
