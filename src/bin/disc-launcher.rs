@@ -120,7 +120,8 @@ fn main() {
             } else {
                 let dev = positional.first().cloned().map(|d| device::device_from_uri(&d).unwrap_or(d)).unwrap_or_else(first_drive);
                 let opts = identify::Options { profile: opt("--profile").unwrap_or_else(|| cfg.drive_profile(&dev)), ..Default::default() };
-                (identify::identify_device(&dev, &opts), dev)
+                // Comme le démon : un Blu-ray (UDF seul) est monté par udisks2 pour être lu.
+                (daemon::identify_mounting(&dev, &opts).map_err(std::io::Error::other), dev)
             };
             let r = r.unwrap_or_else(|e| die(&format!("{dev} : {e}")));
             let offer = daemon::prepare(&cfg, &dev, &r).ok().map(|mut o| {

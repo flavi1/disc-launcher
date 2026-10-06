@@ -18,6 +18,8 @@ pub struct Volume {
     /// Fabricant et modèle (sysfs).
     pub model: String,
     pub mount: Option<PathBuf>,
+    /// Carte mémoire (lecteur SD intégré ou USB) plutôt que clé ou disque.
+    pub sd: bool,
 }
 
 impl Volume {
@@ -74,7 +76,7 @@ pub fn list() -> Vec<Volume> {
         for item in extra.split(':').filter(|s| !s.is_empty()) {
             let (label, dir) = item.split_once('=').unwrap_or(("USB", item));
             if Path::new(dir).is_dir() {
-                v.push(Volume { dev: format!("usb:{dir}"), label: label.into(), fstype: "vfat".into(), size: 0, model: String::new(), mount: Some(PathBuf::from(dir)) });
+                v.push(Volume { dev: format!("usb:{dir}"), label: label.into(), fstype: "vfat".into(), size: 0, model: String::new(), mount: Some(PathBuf::from(dir)), sd: false });
             }
         }
     }
@@ -84,13 +86,18 @@ pub fn list() -> Vec<Volume> {
 pub fn list_in(sys_block: &Path, udev: &Path, use_udisks: bool) -> Vec<Volume> {
     let mut out = vec![];
     let Ok(it) = std::fs::read_dir(sys_block) else { return out };
-    let mut disks: Vec<String> = it.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("sd")).collect();
+    let mut disks: Vec<String> = it.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("sd") || n.starts_with("mmcblk")).collect();
     disks.sort();
     for disk in disks {
         let d = sys_block.join(&disk);
         let real = std::fs::canonicalize(&d).unwrap_or_else(|_| d.clone());
         let usb = real.to_string_lossy().contains("/usb");
-        if read(&d.join("removable")) != "1" && !usb {
+        // Lecteur SD intégré : mmcblkN de type « SD » (pas la mémoire eMMC interne).
+        let mmc_sd = disk.starts_with("mmcblk") && read(&d.join("device/type")) == "SD";
+        if disk.starts_with("mmcblk") && !mmc_sd {
+            continue;
+        }
+        if read(&d.join("removable")) != "1" && !usb && !mmc_sd {
             continue;
         }
         // Lecteur de cartes vide : taille nulle.
@@ -106,6 +113,12 @@ pub fn list_in(sys_block: &Path, udev: &Path, use_udisks: bool) -> Vec<Volume> {
             .unwrap_or_default();
         parts.sort();
         let nodes: Vec<(String, PathBuf)> = if parts.is_empty() { vec![(disk.clone(), d.clone())] } else { parts.iter().map(|p| (p.clone(), d.join(p))).collect() };
+        // Carte mémoire : lecteur intégré, ou lecteur de cartes USB (udev, modèle).
+        let disk_udev = std::fs::read_to_string(udev.join(format!("b{}", read(&d.join("dev"))))).unwrap_or_default();
+        let lower_model = model.to_ascii_lowercase();
+        let sd = mmc_sd
+            || disk_udev.lines().any(|l| l.starts_with("E:ID_DRIVE_FLASH_SD=1") || l.starts_with("E:ID_DRIVE_MEDIA_FLASH_SD=1") || l.starts_with("E:ID_DRIVE_FLASH_MS=1") || l.starts_with("E:ID_DRIVE_FLASH_CF=1"))
+            || ["card reader", "sd/mmc", "sdxc", "sdhc", "cardreader", "multi-card", "multicard"].iter().any(|k| lower_model.contains(k));
         for (name, sys) in nodes {
             let dev = format!("/dev/{name}");
             let (mut fstype, mut label) = match udev_fs(udev, &sys) {
@@ -126,7 +139,7 @@ pub fn list_in(sys_block: &Path, udev: &Path, use_udisks: bool) -> Vec<Volume> {
             }
             label = label.trim().to_string();
             let size = read(&sys.join("size")).parse::<u64>().unwrap_or(0) * 512;
-            out.push(Volume { dev, label, fstype, size, model: model.clone(), mount });
+            out.push(Volume { dev, label, fstype, size, model: model.clone(), mount, sd });
         }
     }
     out
@@ -184,8 +197,22 @@ mod tests {
         mk(&sb.join("sdc"), &[("removable", "1"), ("size", "100"), ("device/vendor", "Retrode"), ("device/model", "2")]);
         // Lecteur de cartes vide : ignoré.
         mk(&sb.join("sdd"), &[("removable", "1"), ("size", "0")]);
-        let v = list_in(&sb, &udev, false);
-        assert_eq!(v.len(), 1, "{v:?}");
+        // Lecteur SD intégré (mmcblk de type SD) : retenu, comme carte mémoire.
+        mk(&sb.join("mmcblk0"), &[("removable", "0"), ("size", "62333952"), ("dev", "179:0"), ("device/type", "SD")]);
+        mk(&sb.join("mmcblk0/mmcblk0p1"), &[("partition", "1"), ("size", "62331904"), ("dev", "179:1")]);
+        std::fs::write(udev.join("b179:1"), "E:ID_FS_TYPE=exfat\nE:ID_FS_LABEL=PHOTOS\n").unwrap();
+        // Mémoire eMMC interne : ignorée.
+        mk(&sb.join("mmcblk1"), &[("removable", "0"), ("size", "1000"), ("dev", "179:8"), ("device/type", "MMC")]);
+        // Lecteur de cartes USB (udev) : carte mémoire.
+        mk(&sb.join("sde"), &[("removable", "1"), ("size", "1000"), ("dev", "8:64"), ("device/vendor", "Generic"), ("device/model", "STORAGE DEVICE")]);
+        std::fs::write(udev.join("b8:64"), "E:ID_DRIVE_FLASH_SD=1\nE:ID_FS_TYPE=vfat\nE:ID_FS_LABEL=APN\n").unwrap();
+        let mut v = list_in(&sb, &udev, false);
+        assert_eq!(v.len(), 3, "{v:?}");
+        let sde = v.pop().unwrap();
+        assert!(sde.dev == "/dev/sde" && sde.sd && sde.label == "APN", "{sde:?}");
+        let mmc = v.remove(0);
+        assert!(mmc.dev == "/dev/mmcblk0p1" && mmc.sd && mmc.label == "PHOTOS", "{mmc:?}");
+        assert!(!v[0].sd);
         assert_eq!(v[0].dev, "/dev/sdb1");
         assert_eq!(v[0].label, "MA CLE");
         assert_eq!(v[0].fstype, "vfat");

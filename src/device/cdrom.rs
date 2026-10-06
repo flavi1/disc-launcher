@@ -74,6 +74,14 @@ pub fn close_tray(path: &str) -> io::Result<()> {
     Ok(())
 }
 
+/// Lecteur à plateau motorisé (sait refermer son tiroir) ? Faux pour les
+/// lecteurs à fente et la plupart des lecteurs de portable.
+pub fn can_close_tray(path: &str) -> bool {
+    let Ok(f) = open_dev(path) else { return false };
+    let caps = unsafe { sys::ioctl(f.as_raw_fd(), sys::CDROM_GET_CAPABILITY) };
+    caps > 0 && caps & sys::CDC_CLOSE_TRAY != 0
+}
+
 /// Fabricant et modèle du lecteur (sysfs), ex. « ASUS DRW-24F1ST ».
 pub fn drive_model(path: &str) -> String {
     let name = path.trim_start_matches("/dev/");

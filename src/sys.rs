@@ -44,6 +44,8 @@ pub const R_OK: c_int = 4;
 // Ioctl CD-ROM (linux/cdrom.h)
 pub const CDROMEJECT: c_ulong = 0x5309;
 pub const CDROMCLOSETRAY: c_ulong = 0x5319;
+pub const CDROM_GET_CAPABILITY: c_ulong = 0x5331;
+pub const CDC_CLOSE_TRAY: c_int = 0x1;
 pub const CDROM_MEDIA_CHANGED: c_ulong = 0x5325;
 pub const CDROM_DRIVE_STATUS: c_ulong = 0x5326;
 pub const CDROM_DISC_STATUS: c_ulong = 0x5327;
