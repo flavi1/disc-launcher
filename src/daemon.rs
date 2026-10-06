@@ -1659,7 +1659,19 @@ pub fn identify_mounting(dev: &str, opts: &identify::Options) -> Result<IdentRes
     if !r.warnings.iter().any(|w| w == "udf-not-mounted") {
         return Ok(r);
     }
-    match crate::dbus::udisks_mount(dev) {
+    // Juste après l'insertion, udisks2 n'a pas toujours fini d'examiner le
+    // disque (« No such interface …Filesystem ») : réessayer quelques secondes.
+    let mut res = crate::dbus::udisks_mount(dev);
+    for _ in 0..15 {
+        match &res {
+            Err(e) if e.to_string().contains("UDisks2.Filesystem") => {
+                std::thread::sleep(Duration::from_secs(1));
+                res = crate::dbus::udisks_mount(dev);
+            }
+            _ => break,
+        }
+    }
+    match res {
         Ok(mp) => dl_log!(info, "identify", "système de fichiers UDF monté par udisks2", "drive" => dev, "mount" => mp),
         Err(e) => {
             // Déjà monté (course avec une autre identification) : on attend le point de montage.

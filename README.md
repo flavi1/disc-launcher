@@ -420,7 +420,7 @@ src/tray.rs panel.rs        icône StatusNotifierItem ; pilotage de la fenêtre
 src/bin/disc-launcher-panel.rs   fenêtre « Disques et périphériques » (GTK 3 chargé à l'exécution)
 src/usb.rs filemanager.rs   volumes USB ; ouverture dans le gestionnaire de fichiers
 src/device/                 lecteur réel (SG_IO), images .iso/.cue, source mémoire
-src/fs/                     ISO 9660, XDVDFS, dossier monté
+src/fs/                     ISO 9660, UDF (jusqu'à 2.60, Blu-ray), XDVDFS, dossier monté
 src/identify/               classificateur : TOC, signatures déclaratives, sondes, profils
 src/naming.rs refdb.rs      nom canonique, cible ; base Redump (DAT)
 src/collection.rs           index SQLite, renommages, existant, .m3u
@@ -442,14 +442,6 @@ contrib/                    exemples de services systemd, OpenRC, runit, s6
 Le projet n'a aujourd'hui aucune dépendance Rust : crates.io n'était pas accessible pendant l'écriture. Les formats JSON, TOML et XML, le client D-Bus et la liaison SQLite sont donc écrits à la main (`src/json.rs`, `toml.rs`, `xml.rs`, `dbus.rs`, `sqlite.rs`). Ils sont testés et suffisent au projet, mais c'est du code à maintenir, et le lecteur TOML ne couvre qu'un sous-ensemble du format.
 
 À faire : les remplacer par les bibliothèques de référence, `serde` + `serde_json`, `toml`, `quick-xml`, `zbus` et `rusqlite`. Chaque module a une interface étroite ; le remplacement peut se faire module par module. Contrepartie : un temps de compilation plus long et des dépendances à suivre.
-
-### Lecture UDF interne
-
-Pour identifier un disque sans le monter, disc-launcher lit lui-même son système de fichiers. Il sait lire l'**ISO 9660** (CD, et la plupart des DVD, qui ont aussi un système de fichiers « pont » ISO 9660) et le **XDVDFS** (Xbox).
-
-Mais la plupart des Blu-ray vidéo, et certains DVD, n'ont qu'un système de fichiers **UDF** (version 2.50 pour les Blu-ray). Pour ces disques, disc-launcher doit passer par le point de montage : en général le bureau monte le disque tout seul, sinon disc-launcher demande le montage à udisks2. Si aucun montage n'est possible (pas de bureau, pas d'udisks2), le Blu-ray vidéo n'est pas reconnu et il est traité comme un disque de données.
-
-À faire : écrire un lecteur UDF en lecture seule, y compris la « partition de métadonnées » propre à l'UDF 2.50, pour supprimer cette dépendance au montage. Il suffit de savoir lister un dossier et lire quelques petits fichiers (`BDMV/index.bdmv`, `PS3_GAME/PARAM.SFO`).
 
 ### Autres pistes
 
