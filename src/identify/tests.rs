@@ -310,3 +310,15 @@ fn data_discs_music_video_dcim() {
     assert!(!r.matches.iter().any(|m| m.tag.starts_with("data:")));
     assert!(r.matches.iter().any(|m| m.tag == "console:windows"));
 }
+
+#[test]
+fn bluray_udf_only_without_mount() {
+    // Blu-ray vidéo : UDF 2.50 seul (partition de métadonnées), aucun montage.
+    let phys = Physical { media: MediaKind::Bd, profile: 0x40, recordable: false, blank: false, sessions: 1, tracks: vec![t(1, 1, true, 0, 20_000_000)], leadout: 20_000_000, disc_type: None, capacity: 20_000_000 };
+    let m = crate::fs::udf::build::Img::new(phys, "RED_BIRD_3D_F2", true).files(&[("BDMV/index.bdmv", b"INDX0200"), ("BDMV/MovieObject.bdmv", b"MOBJ0200"), ("CERTIFICATE/id.bdmv", b"x")]);
+    let r = identify(&m, &opts());
+    assert_eq!(primary_tag(&r).as_deref(), Some("video:bd"), "{:?}", r.warnings);
+    assert_eq!(r.filesystem.as_deref(), Some("udf"));
+    assert_eq!(r.volume_id.as_deref(), Some("RED_BIRD_3D_F2"));
+    assert!(!r.warnings.iter().any(|w| w == "udf-not-mounted"));
+}

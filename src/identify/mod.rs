@@ -231,12 +231,22 @@ impl<'a> Ctx<'a> {
         if let Some(i) = iso {
             out = Some(Rc::new(i));
         }
-        // UDF seul, ou pont ISO sans les dossiers UDF (BD-Video) : on regarde le montage.
+        // UDF seul, ou pont ISO sans les dossiers UDF (BD-Video) : lecture UDF
+        // directe, sinon le point de montage.
         if udf {
-            let need_mount = match &out {
-                None => true,
-                Some(f) => !(f.exists("VIDEO_TS") || f.exists("BDMV") || f.exists("AUDIO_TS") || f.exists("HVDVD_TS") || f.exists("PS3_GAME")),
-            };
+            let useful = |f: &dyn FileSystem| f.exists("VIDEO_TS") || f.exists("BDMV") || f.exists("AUDIO_TS") || f.exists("HVDVD_TS") || f.exists("PS3_GAME");
+            let mut need_mount = out.as_ref().map_or(true, |f| !useful(f.as_ref()));
+            if need_mount {
+                match fs::udf::Udf::open(self.src, track.start) {
+                    Ok(u) => {
+                        if out.is_none() || useful(&u) {
+                            out = Some(Rc::new(u));
+                            need_mount = false;
+                        }
+                    }
+                    Err(e) => self.warn(&format!("{e}")),
+                }
+            }
             if need_mount {
                 match self.src.mount_point().and_then(|p| fs::open_mounted(&p)) {
                     Some(d) => out = Some(Rc::new(d)),

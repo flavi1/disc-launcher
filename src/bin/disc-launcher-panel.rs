@@ -89,6 +89,8 @@ gtk_api! {
     gtk_scrolled_window_set_propagate_natural_height: fn(P, GBool);
     gtk_scrolled_window_set_max_content_height: fn(P, c_int);
     gtk_button_new_from_icon_name: fn(*const c_char, c_int) -> P;
+    gtk_icon_theme_get_default: fn() -> P;
+    gtk_icon_theme_has_icon: fn(P, *const c_char) -> GBool;
     gtk_button_set_relief: fn(P, c_int);
     gtk_widget_set_tooltip_text: fn(P, *const c_char);
     gtk_widget_show_all: fn(P);
@@ -237,6 +239,19 @@ fn bar(v: &Value) -> P {
     }
 }
 
+/// Première icône du thème parmi des candidates séparées par des virgules.
+fn pick_icon(list: &str) -> String {
+    let g = g();
+    let theme = unsafe { (g.gtk_icon_theme_get_default)() };
+    let names: Vec<&str> = list.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    for n in &names {
+        if !theme.is_null() && unsafe { (g.gtk_icon_theme_has_icon)(theme, cs(n).as_ptr()) } != 0 {
+            return n.to_string();
+        }
+    }
+    names.last().map(|s| s.to_string()).unwrap_or_else(|| "media-optical".into())
+}
+
 fn title_markup(it: &Value) -> String {
     format!("<b>{}</b>", escape(it["title"].str_or("")))
 }
@@ -266,7 +281,7 @@ fn build(ui: &mut Ui, state: &Value) {
             (g.gtk_widget_set_margin_bottom)(row, 10);
             (g.gtk_widget_set_margin_start)(row, 12);
             (g.gtk_widget_set_margin_end)(row, 12);
-            let icon = (g.gtk_image_new_from_icon_name)(cs(it["icon"].str_or("media-optical")).as_ptr(), ICON_SIZE_DND);
+            let icon = (g.gtk_image_new_from_icon_name)(cs(&pick_icon(it["icon"].str_or(""))).as_ptr(), ICON_SIZE_DND);
             (g.gtk_widget_set_valign)(icon, ALIGN_START);
             (g.gtk_box_pack_start)(row, icon, 0, 0, 0);
             let col = (g.gtk_box_new)(VERTICAL, 4);

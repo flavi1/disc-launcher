@@ -84,6 +84,8 @@ struct Drive {
     tray: Option<DriveStatus>,
     /// Fabricant et modèle du lecteur optique.
     model: Option<String>,
+    /// Lecteur à plateau motorisé.
+    can_close: bool,
 }
 
 enum Event {
@@ -474,7 +476,7 @@ fn handle_client(s: UnixStream, tx: Sender<Event>) {
 
 impl Daemon {
     fn drive(&mut self, dev: &str) -> &mut Drive {
-        self.drives.entry(dev.to_string()).or_insert_with(|| Drive { dev: dev.to_string(), state: DState::Empty, gen: 0, due: None, settle_until: None, ident: None, offer: None, notif: None, job: None, silent: false, batch: None, usb: None, tray: None, model: None })
+        self.drives.entry(dev.to_string()).or_insert_with(|| Drive { dev: dev.to_string(), state: DState::Empty, gen: 0, due: None, settle_until: None, ident: None, offer: None, notif: None, job: None, silent: false, batch: None, usb: None, tray: None, model: None, can_close: false })
     }
 
     fn main_loop(&mut self, rx: Receiver<Event>) {
@@ -713,17 +715,7 @@ impl Daemon {
                 let dev2 = dev.to_string();
                 std::thread::spawn(move || {
                     let opts = identify::Options { profile, ..Default::default() };
-                    let mut r = identify::identify_device(&dev2, &opts).map_err(|e| e.to_string());
-                    // UDF seul (Blu-ray vidéo…) non monté : demander le montage à udisks2, puis réessayer.
-                    if r.as_ref().is_ok_and(|x| x.warnings.iter().any(|w| w == "udf-not-mounted")) {
-                        match crate::dbus::udisks_mount(&dev2) {
-                            Ok(mp) => {
-                                dl_log!(info, "identify", "système de fichiers UDF monté par udisks2", "drive" => dev2, "mount" => mp);
-                                r = identify::identify_device(&dev2, &opts).map_err(|e| e.to_string());
-                            }
-                            Err(e) => dl_log!(warn, "identify", format!("montage UDF impossible : {e}"), "drive" => dev2),
-                        }
-                    }
+                    let r = identify_mounting(&dev2, &opts);
                     let _ = tx.send(Event::Identified(dev2, gen, Box::new(r)));
                 });
             }
@@ -886,7 +878,7 @@ impl Daemon {
         }
         let replaces = self.drive(dev).notif.unwrap_or(0);
         let Some(nt) = &self.notifier else { return };
-        let icon = offer_icon(&o);
+        let icon = offer_icon(&o, ident.as_ref());
         let n = Notification { replaces, summary, body, icon, actions, resident: true, progress: None, urgency: 1, timeout_ms: 0 };
         if let Some(id) = nt.show(n) {
             self.notif_owner.insert(id, (dev.to_string(), None));
@@ -1080,7 +1072,12 @@ impl Daemon {
     /// Action choisie (notification, boîte, menu de l'icône) : toutes les
     /// propositions se ferment, puis l'action s'exécute.
     fn act(&mut self, dev: &str, key: &str) {
-        self.hide_all();
+        // Lecteur à plateau : après l'ouverture, la fenêtre reste affichée
+        // jusqu'à « Fermer le plateau » (on y pose le disque entre-temps).
+        let keep = matches!(key, "eject" | "open-tray") && dev.starts_with("/dev/sr") && self.drives.get(dev).is_some_and(|d| d.can_close) && self.use_panel() && self.panel_visible;
+        if !keep {
+            self.hide_all();
+        }
         self.perform(dev, key);
     }
 
@@ -1171,6 +1168,7 @@ impl Daemon {
         for dev in devs {
             if dev.starts_with("/dev/sr") && self.drives[&dev].model.is_none() {
                 self.drive(&dev).model = Some(cdrom::drive_model(&dev));
+                self.drive(&dev).can_close = cdrom::can_close_tray(&dev);
             }
             let d = &self.drives[&dev];
             if d.state == DState::Job {
@@ -1203,7 +1201,7 @@ impl Daemon {
                     }
                 }
                 let kind = if optical { 0 } else if d.usb.is_some() { 2 } else { 1 };
-                out.push((kind, jobj! {"id" => dev.clone(), "icon" => offer_icon(o), "title" => summary, "lines" => lines, "usage" => usage, "progress" => Value::Null, "actions" => pairs(&o.actions)}));
+                out.push((kind, jobj! {"id" => dev.clone(), "icon" => offer_icons(o, d.ident.as_ref()).join(","), "title" => summary, "lines" => lines, "usage" => usage, "progress" => Value::Null, "actions" => pairs(&o.actions)}));
                 continue;
             }
             if !optical {
@@ -1224,7 +1222,7 @@ impl Daemon {
             };
             let title = format!("{} ({short}) — {state_txt}", t("drive"));
             let lines: Vec<Value> = d.model.iter().filter(|m| !m.is_empty()).map(|m| Value::from(m.clone())).collect();
-            out.push((0, jobj! {"id" => dev.clone(), "icon" => "drive-optical", "title" => title, "lines" => lines, "usage" => Value::Null, "progress" => Value::Null, "actions" => pairs(&actions), "idle" => true}));
+            out.push((0, jobj! {"id" => dev.clone(), "icon" => "drive-optical,media-optical", "title" => title, "lines" => lines, "usage" => Value::Null, "progress" => Value::Null, "actions" => pairs(&actions), "idle" => true}));
         }
         for id in self.active_jobs.clone() {
             if !shown_jobs.contains(&id) {
@@ -1652,16 +1650,100 @@ impl Daemon {
     }
 }
 
-/// Icône d'une proposition : celle du système si elle est installée.
-fn offer_icon(o: &Offer) -> String {
-    let icon = format!("disc-launcher-{}", o.handler);
-    if icon_exists(&icon) {
-        return icon;
+/// Identification d'un lecteur ; un disque UDF seul (Blu-ray vidéo…) non
+/// monté est monté par udisks2, puis réidentifié. Si le montage échoue parce
+/// qu'une autre identification (ou le bureau) l'a monté entre-temps, le
+/// disque est tout de même relu par son point de montage.
+pub fn identify_mounting(dev: &str, opts: &identify::Options) -> Result<IdentResult, String> {
+    let r = identify::identify_device(dev, opts).map_err(|e| e.to_string())?;
+    if !r.warnings.iter().any(|w| w == "udf-not-mounted") {
+        return Ok(r);
     }
-    match o.handler.as_str() {
-        "usb" => "drive-removable-media-usb".into(),
-        _ => "media-optical".into(),
+    // Juste après l'insertion, udisks2 n'a pas toujours fini d'examiner le
+    // disque (« No such interface …Filesystem ») : réessayer quelques secondes.
+    let mut res = crate::dbus::udisks_mount(dev);
+    for _ in 0..15 {
+        match &res {
+            Err(e) if e.to_string().contains("UDisks2.Filesystem") => {
+                std::thread::sleep(Duration::from_secs(1));
+                res = crate::dbus::udisks_mount(dev);
+            }
+            _ => break,
+        }
     }
+    match res {
+        Ok(mp) => dl_log!(info, "identify", "système de fichiers UDF monté par udisks2", "drive" => dev, "mount" => mp),
+        Err(e) => {
+            // Déjà monté (course avec une autre identification) : on attend le point de montage.
+            let mut found = false;
+            for _ in 0..20 {
+                if crate::device::find_mount_point(dev).is_some() {
+                    found = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            if !found {
+                dl_log!(warn, "identify", format!("montage UDF impossible : {e}"), "drive" => dev);
+                return Ok(r);
+            }
+        }
+    }
+    identify::identify_device(dev, opts).map_err(|e| e.to_string())
+}
+
+/// Icônes candidates d'une proposition, de la plus précise à la plus
+/// générique (noms freedesktop ; la fenêtre prend la première que le thème
+/// possède, Breeze et Adwaita n'ayant pas les mêmes).
+pub fn offer_icons(o: &Offer, ident: Option<&IdentResult>) -> Vec<String> {
+    let own = format!("disc-launcher-{}", o.handler);
+    let mut v: Vec<&str> = vec![];
+    let cart = ident.is_some_and(|i| i.physical.media == crate::device::MediaKind::Cart);
+    if cart {
+        // Types MIME des ROM (fournis par la plupart des thèmes).
+        v.extend(match o.handler.as_str() {
+            "n64" => &["application-x-n64-rom"][..],
+            "snes" => &["application-x-snes-rom"][..],
+            "megadrive" => &["application-x-genesis-rom", "application-x-sega-genesis-rom"][..],
+            "gb" => &["application-x-gameboy-rom"][..],
+            "gbc" => &["application-x-gameboy-color-rom", "application-x-gameboy-rom"][..],
+            "gba" => &["application-x-gba-rom", "application-x-gameboy-advance-rom"][..],
+            "mastersystem" => &["application-x-sms-rom"][..],
+            "gamegear" => &["application-x-gamegear-rom"][..],
+            _ => &[][..],
+        });
+        v.extend(["input-gaming", "media-flash"]);
+    } else {
+        match o.handler.as_str() {
+            "usb" if o.describe["sd"].bool_or(false) => v.extend(["media-flash-sd-mmc", "media-flash", "drive-removable-media"]),
+            "usb" => v.extend(["drive-removable-media-usb", "drive-removable-media"]),
+            "cdda" => v.extend(["media-optical-audio", "audio-x-generic"]),
+            "dcim" | "photo-cd" => v.extend(["camera-photo", "folder-pictures", "image-x-generic"]),
+            "dvd-video" | "dvd-vr" | "vcd" | "svcd" => v.extend(["media-optical-dvd-video", "media-optical-dvd", "media-optical-video", "video-x-generic"]),
+            "bluray-video" | "bdav" | "avchd" | "hddvd-video" => v.extend(["media-optical-blu-ray", "media-optical-video", "video-x-generic"]),
+            "dvd-audio" | "data-audio" => v.extend(["media-optical-audio", "audio-x-generic"]),
+            "data-video" => v.extend(["media-optical-video", "video-x-generic"]),
+            "data" => v.extend(["media-optical-data"]),
+            _ if !o.media => v.extend(["input-gaming"]),
+            _ => {}
+        }
+    }
+    v.push(if o.handler == "usb" { "drive-removable-media" } else { "media-optical" });
+    let mut out = vec![];
+    if icon_exists(&own) {
+        out.push(own);
+    }
+    out.extend(v.into_iter().map(|s| s.to_string()));
+    out
+}
+
+/// Icône unique (notifications) : l'icône propre si installée, sinon la plus générique.
+fn offer_icon(o: &Offer, ident: Option<&IdentResult>) -> String {
+    let v = offer_icons(o, ident);
+    if v.first().is_some_and(|f| f.starts_with("disc-launcher-")) {
+        return v[0].clone();
+    }
+    v.last().cloned().unwrap_or_else(|| "media-optical".into())
 }
 
 /// Proposition pour une clé USB : ouvrir, monter ou démonter, retirer.
@@ -1678,6 +1760,7 @@ pub fn usb_offer(v: &crate::usb::Volume) -> Offer {
         }
     }
     let size = if v.size > 0 { format!(" ({})", crate::usb::human_size(v.size)) } else { String::new() };
+    let kind = if v.sd { t("sd-card") } else { t("usb-key") };
     let model = if v.model.is_empty() || v.label.is_empty() { String::new() } else { format!("{} · ", v.model) };
     let where_ = match &v.mount {
         Some(m) => format!("{model}{} {}", t("mounted-on"), m.display()),
@@ -1686,14 +1769,14 @@ pub fn usb_offer(v: &crate::usb::Volume) -> Offer {
     Offer {
         handler: "usb".into(),
         media: true,
-        handler_name: format!("{} — {}{size}", t("usb-key"), v.name()),
+        handler_name: format!("{kind} — {}{size}", v.name()),
         tag: "usb".into(),
         confidence: Confidence::Strong,
         resolution: None,
         target: None,
         situation: None,
         collision: false,
-        describe: jobj! {"device" => v.dev.clone(), "fs" => v.fstype.clone(), "label" => v.label.clone(), "model" => v.model.clone(), "status" => where_},
+        describe: jobj! {"device" => v.dev.clone(), "fs" => v.fstype.clone(), "label" => v.label.clone(), "model" => v.model.clone(), "status" => where_, "sd" => v.sd},
         actions,
         warnings: vec![],
     }

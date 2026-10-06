@@ -1,8 +1,9 @@
-//! Lecture des systèmes de fichiers sans montage : ISO 9660 et XDVDFS.
-//! Pour l'UDF seul (la plupart des BD-Video), on passe par le point de
-//! montage (`DirFs`).
+//! Lecture des systèmes de fichiers sans montage : ISO 9660, UDF (dont la
+//! partition de métadonnées des Blu-ray) et XDVDFS. Le point de montage
+//! (`DirFs`) ne sert plus qu'en dernier recours.
 
 pub mod iso9660;
+pub mod udf;
 pub mod xdvdfs;
 
 use std::io;

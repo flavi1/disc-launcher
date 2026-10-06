@@ -35,6 +35,7 @@ pub fn t(key: &str) -> &'static str {
         "unmount" => "Démonter", "Unmount";
         "safe-remove" => "Retirer en toute sécurité", "Safely remove";
         "usb-key" => "Volume USB", "USB volume";
+        "sd-card" => "Carte mémoire", "Memory card";
         "safe-to-remove" => "Vous pouvez retirer ce périphérique en toute sécurité.", "This device can be safely removed.";
         "free-of" => "libres sur", "free of";
         "open-tray" => "Ouvrir le plateau", "Open tray";
