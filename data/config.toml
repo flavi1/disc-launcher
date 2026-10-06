@@ -79,7 +79,28 @@ sources = []
 timeout = 5
 cache_days = 90
 
+[autorun]
+# Lancement automatique à l'insertion, sans fenêtre : la première action
+# disponible de « order » est exécutée ; si aucune ne l'est, la fenêtre
+# s'affiche. Désactivé par défaut.
+enabled = false
+# Mots : play (copie existante d'un jeu, ou lecture d'un média), dump-then-play,
+# dump, open (gestionnaire de fichiers), ou une clé d'action (play-disc,
+# custom:rip-cd…).
+order = ["play", "dump-then-play"]
+# Par catégorie (console, cart, media, data, usb) ou par gestionnaire (psx,
+# cdda, dvd-video…), du plus précis au plus général :
+# [autorun.media]
+# enabled = true
+# order = ["play"]
+# [autorun.psx]
+# order = ["play", "dump"]      # jouer, sinon dumper sans jouer
+# [autorun.usb]
+# enabled = false               # ou, dans [autorun] : usb = false
+
 [policy]
+# Ancien réglage, toujours lu (avant [autorun]) : surtout utile pour
+# « ignore » (ni fenêtre ni action à l'insertion).
 # ask | auto-play | auto-dump | dump-then-play | ignore
 # Clé = identifiant de console (psx, gc…) ou de média (cdda, dvd-video…).
 # « media » s'applique à tous les médias sans réglage propre.

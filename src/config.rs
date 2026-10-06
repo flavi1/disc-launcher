@@ -275,6 +275,37 @@ impl Config {
         self.policy_for(system, false)
     }
 
+    /// Lancement automatique : ordre des actions si l'autorun est activé pour
+    /// ce gestionnaire (`psx`, `cdda`…) ou sa catégorie (`console`, `cart`,
+    /// `media`, `data`, `usb`), sinon pour tous ; None s'il est désactivé.
+    ///
+    /// ```toml
+    /// [autorun]
+    /// enabled = true                      # tous les médias
+    /// order = ["play", "dump-then-play"]  # ordre par défaut
+    /// [autorun.cdda]
+    /// order = ["play"]
+    /// [autorun.usb]
+    /// enabled = false                     # ou : usb = false
+    /// ```
+    pub fn autorun_for(&self, id: &str, category: &str) -> Option<Vec<String>> {
+        let a = self.raw.get("autorun");
+        let layers = [a.get(id), a.get(category), a];
+        let enabled = layers
+            .iter()
+            .find_map(|l| match l {
+                Value::Bool(b) => Some(*b),
+                Value::Obj(_) => l.get("enabled").as_bool(),
+                _ => None,
+            })
+            .unwrap_or(false);
+        if !enabled {
+            return None;
+        }
+        let order = layers.iter().map(|l| l.get("order").strings()).find(|o| !o.is_empty()).unwrap_or_else(|| vec!["play".into(), "dump-then-play".into()]);
+        Some(order)
+    }
+
     pub fn policy_for(&self, id: &str, media: bool) -> Policy {
         let p = self.raw.get("policy");
         p.get(id)

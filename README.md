@@ -321,12 +321,44 @@ terminal = true          # suivre chaque dump dans un terminal (false : notifica
 [drives."/dev/sr0"]
 profile = "omnidrive"    # lecteur flashé (OmniDrive) ; voir disc-launcher doctor
 
-[policy]
-media = "auto-play"      # lire les médias sans question
-psx = "dump-then-play"
+[autorun]
+enabled = true           # lancement automatique à l'insertion (désactivé par défaut)
 ```
 
-`[policy]` remplace la question posée à l'insertion par une action automatique, système par système (`ask`, `auto-play`, `auto-dump`, `dump-then-play`, `ignore`).
+**Lancement automatique (autorun).** Désactivé par défaut. Activé, il exécute à l'insertion la première action disponible de `order`, sans ouvrir la fenêtre ; si aucune ne l'est, la fenêtre s'affiche comme d'habitude.
+
+```toml
+[autorun]
+enabled = true
+order = ["play", "dump-then-play"]   # par défaut : jouer la copie si elle existe, sinon dumper puis jouer
+```
+
+| Mot de `order` | Action |
+| --- | --- |
+| `play` | jeu : lancer la copie présente dans `~/ROMs` ; média (CD audio, DVD, Blu-ray) : lire le disque |
+| `dump-then-play` | dumper puis jouer (disque manquant d'un jeu multi-disques : le dumper) |
+| `dump` | dumper sans jouer |
+| `open` | ouvrir dans le gestionnaire de fichiers |
+| autre | une clé d'action : `play-disc` (jouer depuis le disque), `custom:rip-cd`… |
+
+`enabled` et `order` se règlent pour tous les médias (`[autorun]`), par catégorie (`console`, `cart`, `media`, `data`, `usb`) ou par gestionnaire (`psx`, `cdda`, `dvd-video`…), du plus précis au plus général :
+
+```toml
+[autorun]
+enabled = true
+usb = false                  # raccourci de [autorun.usb] enabled = false
+
+[autorun.console]
+order = ["play"]             # jouer ou rien : un nouveau jeu affiche la fenêtre
+
+[autorun.psx]
+order = ["play", "dump"]     # jouer, sinon dumper sans jouer
+
+[autorun.media]
+order = ["play"]             # lire les CD audio, DVD et Blu-ray
+```
+
+Rien n'est automatique pour un disque présent à l'ouverture de session, une identification incertaine ou un dump interrompu. `[policy]` (`ask`, `ignore`, et les anciennes valeurs `auto-play`, `auto-dump`, `dump-then-play`) reste lu avant `[autorun]` : `ignore` empêche toute fenêtre et toute action à l'insertion.
 
 **Suivre un dump.** Chaque dump ouvre un terminal qui affiche ses étapes et la sortie de redumper, chdman, etc. Le terminal est cherché dans cet ordre : `terminal_command`, `xdg-terminal-exec`, le terminal par défaut du bureau (KDE, Xfce, GNOME, Cinnamon, MATE), `$TERMINAL`, `x-terminal-emulator`, puis les terminaux courants. Fermer le terminal n'interrompt pas le dump ; `disc-launcher watch` le rouvre, et `disc-launcher cancel <id>` l'annule.
 

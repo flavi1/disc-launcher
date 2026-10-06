@@ -250,6 +250,19 @@ for _ in range(40):
     time.sleep(0.2)
 check(gone, "démon : cartouche retirée")
 os.rename(rom_path + ".bak", rom_path)
+# Autorun des cartouches : « Jouer » (copie existante) sans fenêtre.
+write(os.path.join(HOME, ".config/disc-launcher/config.toml"), "[autorun]\ncart = true\n")
+run("disc-launcher", "reload")
+run("disc-launcher", "refresh", rom_path, check=False)
+auto = False
+for _ in range(60):
+    dlog = open(os.path.join(state_dir, "log", "daemon.log")).read()
+    if "comp=autorun" in dlog and "action=play-existing" in dlog:
+        auto = True
+        break
+    time.sleep(0.2)
+check(auto, "autorun : cartouche déjà dumpée → « Jouer » automatiquement")
+os.remove(os.path.join(HOME, ".config/disc-launcher/config.toml"))
 run("disc-launcher", "reload")
 d2 = subprocess.run([os.path.join(BIN, "disc-launcherd")], env=ENV, capture_output=True, text=True, timeout=10)
 check(d2.returncode == 0, "démon : instance unique")

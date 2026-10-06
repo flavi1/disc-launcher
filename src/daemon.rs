@@ -859,6 +859,19 @@ impl Daemon {
             self.perform(dev, k);
             return;
         }
+        // Lancement automatique ([autorun]) : première action disponible de
+        // l'ordre choisi ; sinon, la fenêtre s'affiche.
+        let category = offer_category(&offer, self.drive(dev).ident.as_ref());
+        if let Some(order) = self.cfg.autorun_for(&offer.handler, category) {
+            match resolve_autorun(&order, &offer.actions, offer.media) {
+                Some(k) => {
+                    dl_log!(info, "autorun", "action automatique", "drive" => dev, "category" => category, "order" => order.join(","), "action" => k);
+                    self.perform(dev, &k);
+                    return;
+                }
+                None => dl_log!(info, "autorun", "aucune action de l'ordre disponible : proposition affichée", "drive" => dev, "order" => order.join(",")),
+            }
+        }
         self.show_offer(dev);
     }
 
@@ -1650,6 +1663,51 @@ impl Daemon {
     }
 }
 
+/// Catégorie d'une proposition pour `[autorun.<catégorie>]` : `cart`
+/// (cartouche), `usb`, `data` (disque de données ou de fichiers), `media`
+/// (CD audio, DVD, Blu-ray…), `console` (disque de jeu).
+pub fn offer_category(o: &Offer, ident: Option<&IdentResult>) -> &'static str {
+    if ident.is_some_and(|i| i.physical.media == crate::device::MediaKind::Cart) {
+        "cart"
+    } else if o.handler == "usb" {
+        "usb"
+    } else if o.handler == "data" || o.handler.starts_with("data-") {
+        "data"
+    } else if o.media {
+        "media"
+    } else {
+        "console"
+    }
+}
+
+/// Première action disponible d'un ordre d'autorun. Mots de l'ordre :
+/// - `play` : lancer la copie existante (jeu) ou lire le disque (média) ;
+/// - `dump-then-play` : dumper puis jouer (disque manquant d'un jeu
+///   multi-disques : le dumper) ;
+/// - `dump` : dumper (y compris compléter un jeu multi-disques) ;
+/// - `open` : ouvrir dans le gestionnaire de fichiers ;
+/// - toute autre clé d'action (`play-disc`, `custom:rip-cd`…).
+pub fn resolve_autorun(order: &[String], actions: &[(String, String)], media: bool) -> Option<String> {
+    let has = |k: &str| actions.iter().any(|(a, _)| a == k);
+    for word in order {
+        let candidates: Vec<&str> = match word.as_str() {
+            "play" if media => vec!["play-disc"],
+            // Jeu multi-disques incomplet : « jouer » ne lance pas un jeu auquel
+            // il manque ce disque ; l'ordre passe au dump.
+            "play" if has("complete-game") => vec!["play-existing"],
+            "play" => vec!["play-existing", "play-game"],
+            "dump-then-play" => vec!["dump-then-play", "complete-game"],
+            "dump" => vec!["dump", "complete-game"],
+            "open" => vec!["open-files"],
+            other => vec![other],
+        };
+        if let Some(k) = candidates.into_iter().find(|k| has(k)) {
+            return Some(k.to_string());
+        }
+    }
+    None
+}
+
 /// Identification d'un lecteur ; un disque UDF seul (Blu-ray vidéo…) non
 /// monté est monté par udisks2, puis réidentifié. Si le montage échoue parce
 /// qu'une autre identification (ou le bureau) l'a monté entre-temps, le
@@ -2218,4 +2276,49 @@ pub fn start_verify(dev: &str, o: &Offer) -> Result<String, String> {
     let id = jobs::create(plan).map_err(|e| e.to_string())?;
     jobs::spawn(&id).map_err(|e| e.to_string())?;
     Ok(id)
+}
+
+#[cfg(test)]
+mod autorun_tests {
+    use super::resolve_autorun;
+    fn a(keys: &[&str]) -> Vec<(String, String)> {
+        keys.iter().map(|k| (k.to_string(), String::new())).collect()
+    }
+    fn o(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+    #[test]
+    fn orders() {
+        let default = o(&["play", "dump-then-play"]);
+        // Jeu déjà présent : jouer.
+        assert_eq!(resolve_autorun(&default, &a(&["play-existing", "verify", "redump", "eject"]), false).as_deref(), Some("play-existing"));
+        // Nouveau jeu : dumper puis jouer (pas « jouer le disque »).
+        assert_eq!(resolve_autorun(&default, &a(&["dump", "dump-then-play", "play-disc", "eject"]), false).as_deref(), Some("dump-then-play"));
+        // « Jouer ou rien » : nouveau jeu → aucune action, la fenêtre s'affiche.
+        assert_eq!(resolve_autorun(&o(&["play"]), &a(&["dump", "dump-then-play", "play-disc"]), false), None);
+        // « Jouer, sinon dumper ».
+        assert_eq!(resolve_autorun(&o(&["play", "dump"]), &a(&["dump", "dump-then-play"]), false).as_deref(), Some("dump"));
+        // Disque manquant d'un jeu multi-disques : le dumper.
+        assert_eq!(resolve_autorun(&default, &a(&["complete-game", "play-game"]), false).as_deref(), Some("complete-game"));
+        // Dump interrompu : rien d'automatique.
+        assert_eq!(resolve_autorun(&default, &a(&["restart-dump", "delete-partial"]), false), None);
+        // Média : lire le disque ; clé USB : ouvrir.
+        assert_eq!(resolve_autorun(&default, &a(&["play-disc", "open-files", "eject"]), true).as_deref(), Some("play-disc"));
+        assert_eq!(resolve_autorun(&o(&["open"]), &a(&["open-files", "unmount"]), true).as_deref(), Some("open-files"));
+        assert_eq!(resolve_autorun(&o(&["custom:rip-cd", "play"]), &a(&["play-disc", "custom:rip-cd"]), true).as_deref(), Some("custom:rip-cd"));
+    }
+
+    #[test]
+    fn config_layers() {
+        let cfg = |t: &str| crate::config::Config { errors: vec![], raw: crate::toml::parse(t).unwrap() };
+        assert_eq!(cfg("").autorun_for("psx", "console"), None);
+        let c = cfg("[autorun]\nenabled = true\n[autorun.cdda]\norder = [\"play\"]\n[autorun.usb]\nenabled = false\n");
+        assert_eq!(c.autorun_for("psx", "console").unwrap(), ["play", "dump-then-play"]);
+        assert_eq!(c.autorun_for("cdda", "media").unwrap(), ["play"]);
+        assert_eq!(c.autorun_for("usb", "usb"), None);
+        let c = cfg("[autorun]\npsx = true\n[autorun.media]\nenabled = true\norder = [\"play\"]\n");
+        assert!(c.autorun_for("psx", "console").is_some());
+        assert_eq!(c.autorun_for("gc", "console"), None);
+        assert_eq!(c.autorun_for("dvd-video", "media").unwrap(), ["play"]);
+    }
 }
