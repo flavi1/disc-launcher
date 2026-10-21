@@ -75,6 +75,11 @@ pub fn t(key: &str) -> &'static str {
         "no-player" => "Aucun lecteur multimédia disponible", "No media player available";
         "cancel" => "Annuler", "Cancel";
         "open-folder" => "Ouvrir le dossier", "Open folder";
+        "encode-disc" => "Encoder (encbd)", "Encode (encbd)";
+        "reencode-disc" => "Réencoder (encbd)", "Re-encode (encbd)";
+        "play-copy" => "Lire la copie", "Play the copy";
+        "open-album" => "Ouvrir l'album", "Open the album";
+        "encbd-pending" => "Recherche du nom (encbd)…", "Looking up the name (encbd)…";
         "play" => "Lancer", "Play";
         "dump-raw" => "Dumper (identification après lecture)", "Dump (identify after reading)";
         "sit-known" => "Copie existante", "Existing copy";

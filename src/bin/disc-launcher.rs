@@ -395,6 +395,10 @@ fn doctor() {
     println!("fenêtre        : {panel}");
     println!("coquilles nat. : {}", if disclauncher::native::enabled() || disclauncher::native::system_wide() { "actives (disc-launcher native disable pour les retirer)" } else { "inactives (disc-launcher native enable, pour le mode hybride)" });
     println!("dialogue       : {}", disclauncher::notify::dialog_tool().unwrap_or("aucun"));
+    println!("encbd          : {}", match disclauncher::encbd::command(&cfg) {
+        Some(c) => format!("{} (CD audio → {}, DVD/Blu-ray → {})", c.join(" "), disclauncher::encbd::dest_dir(&cfg, "music").display(), disclauncher::encbd::dest_dir(&cfg, "video").display()),
+        None => "absent ou désactivé (encodage des CD audio, DVD et Blu-ray indisponible)".into(),
+    });
     println!("pkexec         : {}", if paths::which("pkexec").is_some() { "oui" } else { "non" });
     {
         // Groupe dispensant du mot de passe pour les lectures privilégiées (règle polkit).

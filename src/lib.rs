@@ -24,6 +24,7 @@ pub mod cart;
 pub mod collection;
 pub mod custom;
 pub mod data;
+pub mod encbd;
 pub mod filemanager;
 pub mod generic;
 pub mod handlers;

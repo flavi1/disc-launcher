@@ -96,6 +96,8 @@ enum Event {
     Cart(String, bool),
     Identified(String, u64, Box<Result<IdentResult, String>>),
     Prepared(String, u64, Box<Result<Offer, String>>),
+    /// Nom prévu par encbd (et copie connue de la collection) pour un média.
+    Encbd(String, u64, Box<Result<Value, String>>, Option<String>),
     /// Clé USB apparue, modifiée (montage) ou retirée (None) ; vrai au premier sondage.
     Usb(String, Option<crate::usb::Volume>, bool),
     Notify(NotifyEvent),
@@ -688,6 +690,7 @@ impl Daemon {
             Event::Error(dev, msg) => self.error_notif(&dev, &msg),
             Event::Identified(dev, gen, res) => self.on_identified(&dev, gen, *res),
             Event::Prepared(dev, gen, res) => self.on_prepared(&dev, gen, *res),
+            Event::Encbd(dev, gen, res, known) => self.on_encbd(&dev, gen, *res, known),
             Event::Notify(NotifyEvent::Action { id, key }) => self.on_action(id, &key),
             Event::Notify(NotifyEvent::Closed { id, .. }) => {
                 if let Some((dev, None)) = self.notif_owner.get(&id).cloned() {
@@ -870,6 +873,8 @@ impl Daemon {
         };
         // Actions personnalisées de la configuration ([actions.<nom>]).
         crate::custom::extend(&self.cfg, &offer.handler, &mut offer.actions);
+        // CD audio, DVD, Blu-ray : encodage par encbd, nom prévu demandé en arrière-plan.
+        self.start_encbd(dev, gen, &mut offer);
         if let Some(t) = &offer.target {
             dl_log!(info, "resolve", "cible prédite", "drive" => dev, "target" => t.path.display(),
                 "confidence" => offer.resolution.as_ref().map(|r| r.confidence.name()).unwrap_or("-"),
@@ -942,6 +947,60 @@ impl Daemon {
             }
         }
         self.show_offer(dev);
+    }
+
+    fn start_encbd(&mut self, dev: &str, gen: u64, offer: &mut Offer) {
+        let Some(kind) = crate::encbd::kind_for(&offer.handler) else { return };
+        let Some(cmd) = crate::encbd::command(&self.cfg) else { return };
+        if !dev.starts_with("/dev/") {
+            return;
+        }
+        let at = offer.actions.iter().position(|(k, _)| k == "open-files" || k == "eject").unwrap_or(offer.actions.len());
+        offer.actions.insert(at, (crate::encbd::ACTION.into(), t("encode-disc").into()));
+        offer.describe.set("encbd_pending", true);
+        let dest = crate::encbd::dest_dir(&self.cfg, kind);
+        let fp = self.drives.get(dev).and_then(|d| d.ident.as_ref()).map(|i| i.fingerprint.clone()).unwrap_or_default();
+        let tx = self.tx.clone();
+        let d = dev.to_string();
+        std::thread::spawn(move || {
+            let known = crate::encbd::known_copy(&fp);
+            let r = crate::encbd::identify(&cmd, &d, &dest, Duration::from_secs(120));
+            let _ = tx.send(Event::Encbd(d, gen, Box::new(r), known));
+        });
+    }
+
+    fn on_encbd(&mut self, dev: &str, gen: u64, res: Result<Value, String>, known: Option<String>) {
+        if self.drive(dev).gen != gen {
+            return;
+        }
+        let fp = self.drive(dev).ident.as_ref().map(|i| i.fingerprint.clone()).unwrap_or_default();
+        let Some(o) = self.drive(dev).offer.as_mut() else { return };
+        o.describe.set("encbd_pending", false);
+        let pred = match res {
+            Ok(p) => p,
+            Err(e) => {
+                dl_log!(warn, "encbd", e, "drive" => dev);
+                o.describe.set("encbd_error", true);
+                Value::Null
+            }
+        };
+        let found = crate::encbd::existing(&pred).or(known.clone());
+        if let Some(path) = &found {
+            // Copie trouvée par encbd : rattachée à ce disque dans la collection.
+            if known.as_deref() != Some(path) {
+                crate::encbd::record(&o.handler, &fp, path, pred["title"].str_or(""));
+            }
+            if !o.actions.iter().any(|(k, _)| k == crate::encbd::OPEN_COPY) {
+                o.actions.insert(0, (crate::encbd::OPEN_COPY.into(), t(if o.handler == "cdda" { "open-album" } else { "play-copy" }).into()));
+            }
+            if let Some(a) = o.actions.iter_mut().find(|(k, _)| k == crate::encbd::ACTION) {
+                a.1 = t("reencode-disc").into();
+            }
+            o.describe.set("encbd_copy", path.clone());
+        }
+        dl_log!(info, "encbd", "nom prévu", "drive" => dev, "title" => pred["title"].str_or("-"), "origin" => pred["origin"].str_or("-"),
+            "target" => pred["final_path"].str_or("-"), "existing" => found.unwrap_or_default());
+        o.describe.set("encbd", pred);
     }
 
     fn show_offer(&mut self, dev: &str) {
@@ -1473,7 +1532,49 @@ impl Daemon {
         if key.starts_with(crate::custom::PREFIX) {
             return self.perform_custom(dev, key);
         }
+        if key == crate::encbd::ACTION || key == crate::encbd::OPEN_COPY {
+            self.perform_encbd(dev, key);
+            return true;
+        }
         self.perform_device_rest(dev, key)
+    }
+
+    fn perform_encbd(&mut self, dev: &str, key: &str) {
+        let Some(o) = self.drives.get(dev).and_then(|d| d.offer.clone()) else { return };
+        let fp = self.drives.get(dev).and_then(|d| d.ident.as_ref()).map(|i| i.fingerprint.clone()).unwrap_or_default();
+        if key == crate::encbd::OPEN_COPY {
+            let Some(p) = o.describe["encbd_copy"].as_str().map(PathBuf::from) else { return };
+            let r = if p.is_dir() { crate::filemanager::open(&self.cfg, &p).map(|_| ()) } else { crate::generic::spawn_detached(&["xdg-open".into(), p.to_string_lossy().into_owned()], &paths::log_dir().join("open-copy.log")).map(|_| ()) };
+            match r {
+                Ok(()) => dl_log!(info, "encbd", "copie ouverte", "drive" => dev, "path" => p.display()),
+                Err(e) => self.error_notif(dev, &e),
+            }
+            return;
+        }
+        let (Some(kind), Some(cmd)) = (crate::encbd::kind_for(&o.handler), crate::encbd::command(&self.cfg)) else {
+            self.error_notif(dev, "encbd introuvable (voir [encbd] dans la configuration)");
+            return;
+        };
+        let pred = Some(&o.describe["encbd"]).filter(|v| v.as_obj().is_some());
+        let dest = crate::encbd::dest_dir(&self.cfg, kind);
+        let _ = std::fs::create_dir_all(&dest);
+        let argv = crate::encbd::encode_argv(&cmd, pred, dev, &dest);
+        let Some(full) = crate::terminal::command(&self.cfg, &argv) else {
+            self.error_notif(dev, "aucun terminal trouvé (réglez [general] terminal_command)");
+            return;
+        };
+        match crate::generic::spawn_detached(&full, &paths::log_dir().join("encbd.log")) {
+            Ok(_) => {
+                dl_log!(info, "encbd", "encodage lancé dans un terminal", "drive" => dev, "cmd" => argv.join(" "));
+                // Film : le fichier final n'apparaît qu'en fin d'encodage ; il est
+                // rattaché dès maintenant au disque et sera reconnu ensuite.
+                if let Some(p) = pred.filter(|p| p["kind"].str_or("") != "cd" && crate::encbd::name_known(p)) {
+                    crate::encbd::record(&o.handler, &fp, p["final_path"].str_or(""), p["title"].str_or(""));
+                }
+                self.drive(dev).state = DState::Idle;
+            }
+            Err(e) => self.error_notif(dev, &e),
+        }
     }
 
     fn perform_custom(&mut self, dev: &str, key: &str) -> bool {
@@ -1874,7 +1975,8 @@ pub fn offer_category(o: &Offer, ident: Option<&IdentResult>) -> &'static str {
 /// - `play` : lancer la copie existante (jeu) ou lire le disque (média) ;
 /// - `dump-then-play` : dumper puis jouer (disque manquant d'un jeu
 ///   multi-disques : le dumper) ;
-/// - `dump` : dumper (y compris compléter un jeu multi-disques) ;
+/// - `dump` : dumper (y compris compléter un jeu multi-disques) ; pour un
+///   média (CD audio, DVD, Blu-ray), encoder avec encbd (aussi : `encode`) ;
 /// - `open` : ouvrir dans le gestionnaire de fichiers ;
 /// - toute autre clé d'action (`play-disc`, `custom:rip-cd`…).
 pub fn resolve_autorun(order: &[String], actions: &[(String, String)], media: bool) -> Option<String> {
@@ -1887,6 +1989,8 @@ pub fn resolve_autorun(order: &[String], actions: &[(String, String)], media: bo
             "play" if has("complete-game") => vec!["play-existing"],
             "play" => vec!["play-existing", "play-game"],
             "dump-then-play" => vec!["dump-then-play", "complete-game"],
+            // Média : « dumper » revient à encoder (encbd).
+            "dump" | "encode" if media => vec![crate::encbd::ACTION],
             "dump" => vec!["dump", "complete-game"],
             "open" => vec!["open-files"],
             other => vec![other],
@@ -2112,6 +2216,11 @@ pub fn offer_text(cfg: &Config, o: &Offer, ident: Option<&IdentResult>) -> (Stri
     }
     if o.handler == "usb" || o.handler == "vinyl" {
         lines.push(o.describe["status"].str_or("").to_string());
+    }
+    if o.describe["encbd"].as_obj().is_some() {
+        lines.extend(crate::encbd::lines(&o.describe["encbd"], o.describe["encbd_copy"].as_str()));
+    } else if o.describe["encbd_pending"].bool_or(false) {
+        lines.push(t("encbd-pending").into());
     }
     for w in &o.warnings {
         lines.push(format!("⚠ {}", notify::warning_text(w)));
@@ -2498,6 +2607,9 @@ mod autorun_tests {
         assert_eq!(resolve_autorun(&default, &a(&["play-disc", "open-files", "eject"]), true).as_deref(), Some("play-disc"));
         assert_eq!(resolve_autorun(&o(&["open"]), &a(&["open-files", "unmount"]), true).as_deref(), Some("open-files"));
         assert_eq!(resolve_autorun(&o(&["custom:rip-cd", "play"]), &a(&["play-disc", "custom:rip-cd"]), true).as_deref(), Some("custom:rip-cd"));
+        // Média : « dump » et « encode » désignent l'encodage par encbd.
+        assert_eq!(resolve_autorun(&o(&["dump", "play"]), &a(&["play-disc", "encode-disc", "eject"]), true).as_deref(), Some("encode-disc"));
+        assert_eq!(resolve_autorun(&o(&["encode"]), &a(&["play-disc", "eject"]), true), None);
     }
 
     #[test]
