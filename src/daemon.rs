@@ -86,6 +86,8 @@ struct Drive {
     model: Option<String>,
     /// Lecteur à plateau motorisé.
     can_close: bool,
+    /// Platine vinyle (vinylrip).
+    vinyl: Option<crate::vinyl::Turntable>,
 }
 
 enum Event {
@@ -101,6 +103,8 @@ enum Event {
     Dialog(u64, Option<(String, String)>),
     Tray(crate::tray::TrayEvent),
     Panel(crate::panel::PanelEvent),
+    /// Platine vinyle branchée (ou débranchée : None) ; vrai au premier sondage.
+    Vinyl(Option<crate::vinyl::Turntable>, bool),
     /// Erreur survenue dans un fil d'action, à signaler.
     Error(String, String),
     Control(Value, Sender<Value>),
@@ -137,6 +141,10 @@ pub struct Daemon {
     /// Ramener la fenêtre au premier plan au prochain envoi.
     panel_raise: bool,
     panel_starts: u32,
+    /// Écoute de la platine en cours : (périphérique, processus vinylrip listen).
+    listening: Option<(String, std::process::Child)>,
+    /// Encodage vinylrip en cours dans un terminal : (périphérique, PID du terminal).
+    encoding: Option<(String, u32)>,
 }
 
 /// Lance le démon (bloquant). Renvoie un code de sortie.
@@ -260,6 +268,8 @@ pub fn run(foreground: bool) -> i32 {
         panel_visible: false,
         panel_raise: false,
         panel_starts: 0,
+        listening: None,
+        encoding: None,
     };
     d.panel_cmd = crate::panel::command(&d.cfg);
     d.panel_ok = d.panel_cmd.is_some();
@@ -285,6 +295,9 @@ pub fn run(foreground: bool) -> i32 {
         }
     }
     d.main_loop(rx);
+    if let Some((_, c)) = d.listening.take() {
+        crate::vinyl::stop_listen(c);
+    }
     dl_log!(info, "daemon", "arrêt");
     drop(lock);
     0
@@ -395,6 +408,31 @@ fn spawn_event_sources(tx: Sender<Event>) {
             }
         })
         .ok();
+    // Platine vinyle désignée par la configuration de vinylrip, sondée toutes les 2 s.
+    let txv = tx.clone();
+    std::thread::Builder::new()
+        .name("vinyl".into())
+        .spawn(move || {
+            let mut known: Option<crate::vinyl::Turntable> = None;
+            let mut first = true;
+            loop {
+                let now = crate::vinyl::detect();
+                if now != known || (first && now.is_some()) {
+                    if let Some(t) = &now {
+                        dl_log!(info, "vinyl", "platine détectée", "card" => t.card_id, "name" => t.name);
+                    } else if known.is_some() {
+                        dl_log!(info, "vinyl", "platine débranchée");
+                    }
+                    if txv.send(Event::Vinyl(now.clone(), first)).is_err() {
+                        return;
+                    }
+                    known = now;
+                }
+                first = false;
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        })
+        .ok();
     // Sondage de secours (toutes les 2 s) : état du tiroir/disque.
     std::thread::Builder::new()
         .name("poll".into())
@@ -476,7 +514,7 @@ fn handle_client(s: UnixStream, tx: Sender<Event>) {
 
 impl Daemon {
     fn drive(&mut self, dev: &str) -> &mut Drive {
-        self.drives.entry(dev.to_string()).or_insert_with(|| Drive { dev: dev.to_string(), state: DState::Empty, gen: 0, due: None, settle_until: None, ident: None, offer: None, notif: None, job: None, silent: false, batch: None, usb: None, tray: None, model: None, can_close: false })
+        self.drives.entry(dev.to_string()).or_insert_with(|| Drive { dev: dev.to_string(), state: DState::Empty, gen: 0, due: None, settle_until: None, ident: None, offer: None, notif: None, job: None, silent: false, batch: None, usb: None, tray: None, model: None, can_close: false, vinyl: None })
     }
 
     fn main_loop(&mut self, rx: Receiver<Event>) {
@@ -552,6 +590,7 @@ impl Daemon {
     }
 
     fn tick(&mut self) {
+        self.refresh_vinyl();
         let now = Instant::now();
         let due: Vec<String> = self.drives.values().filter(|d| d.due.map_or(false, |t| t <= now)).map(|d| d.dev.clone()).collect();
         for dev in due {
@@ -621,6 +660,30 @@ impl Daemon {
                 }
             }
             Event::Tray(e) => self.on_tray(e),
+            Event::Vinyl(Some(t), initial) => {
+                let dev = format!("vinyl:{}", t.card_id);
+                // Une autre platine remplace l'ancienne.
+                let old: Vec<String> = self.drives.iter().filter(|(k, d)| d.vinyl.is_some() && **k != dev).map(|(k, _)| k.clone()).collect();
+                for k in old {
+                    self.remove_vinyl(&k);
+                }
+                let silent = initial && !self.cfg.notify_on_startup();
+                let fresh = self.drives.get(&dev).map_or(true, |d| d.vinyl.is_none());
+                let d = self.drive(&dev);
+                d.vinyl = Some(t);
+                if fresh {
+                    d.gen += 1;
+                    d.state = DState::Settling;
+                    d.silent = silent;
+                    d.due = Some(Instant::now());
+                }
+            }
+            Event::Vinyl(None, _) => {
+                let old: Vec<String> = self.drives.iter().filter(|(_, d)| d.vinyl.is_some()).map(|(k, _)| k.clone()).collect();
+                for k in old {
+                    self.remove_vinyl(&k);
+                }
+            }
             Event::Panel(e) => self.on_panel(e),
             Event::Error(dev, msg) => self.error_notif(&dev, &msg),
             Event::Identified(dev, gen, res) => self.on_identified(&dev, gen, *res),
@@ -693,6 +756,12 @@ impl Daemon {
     }
 
     fn check_drive(&mut self, dev: &str) {
+        if self.drives.get(dev).is_some_and(|d| d.vinyl.is_some()) {
+            let gen = self.drive(dev).gen;
+            self.drive(dev).due = None;
+            let o = self.vinyl_offer(dev);
+            return self.on_prepared(dev, gen, Ok(o));
+        }
         if let Some(v) = self.drives.get(dev).and_then(|d| d.usb.clone()) {
             let gen = self.drive(dev).gen;
             self.drive(dev).due = None;
@@ -820,7 +889,7 @@ impl Daemon {
         }
         // Mode hybride : la coquille native propose la lecture des médias ;
         // le démon ne parle qu'en cas de contradiction (jeu déguisé en média).
-        if self.cfg.mode() == Mode::Hybrid && offer.media {
+        if self.cfg.mode() == Mode::Hybrid && offer.media && offer.handler != "vinyl" {
             self.drive(dev).state = DState::Idle;
             return;
         }
@@ -1253,8 +1322,12 @@ impl Daemon {
         let items: Vec<Value> = self.panel_items().into_iter().map(|(_, v)| v).collect();
         let present: Vec<&Value> = items.iter().filter(|v| !v["idle"].bool_or(false)).collect();
         if let Some(tx) = &self.tray {
-            let tooltip = if present.is_empty() { t("tray-empty").to_string() } else { present.iter().map(|v| v["title"].str_or("").to_string()).collect::<Vec<_>>().join("\n") };
-            let m = crate::tray::Model { active: !present.is_empty(), tooltip };
+            // L'icône reste visible tant qu'un lecteur à plateau motorisé est
+            // présent, même vide : il faut pouvoir ouvrir le plateau.
+            let trays: Vec<&Value> = items.iter().filter(|v| v["idle"].bool_or(false) && self.drives.get(v["id"].str_or("")).is_some_and(|d| d.can_close)).collect();
+            let shown: Vec<&Value> = if present.is_empty() { trays.clone() } else { present.clone() };
+            let tooltip = if shown.is_empty() { t("tray-empty").to_string() } else { shown.iter().map(|v| v["title"].str_or("").to_string()).collect::<Vec<_>>().join("\n") };
+            let m = crate::tray::Model { active: !present.is_empty() || !trays.is_empty(), tooltip };
             if self.tray_model.as_ref() != Some(&m) {
                 let _ = tx.send(m.clone());
                 self.tray_model = Some(m);
@@ -1289,10 +1362,122 @@ impl Daemon {
         None
     }
 
+    /// Proposition de la platine : écouter ou arrêter l'écoute, encoder
+    /// (indisponible pendant l'écoute ; rien pendant l'encodage).
+    fn vinyl_offer(&self, dev: &str) -> Offer {
+        let tt = self.drives.get(dev).and_then(|d| d.vinyl.clone());
+        let name = tt.as_ref().map(|x| x.name.clone()).unwrap_or_default();
+        let listening = self.listening.as_ref().is_some_and(|(d, _)| d == dev);
+        let encoding = self.encoding.as_ref().is_some_and(|(d, _)| d == dev);
+        let (actions, status): (Vec<(String, String)>, &str) = if encoding {
+            (vec![], t("vinyl-encoding"))
+        } else if listening {
+            (vec![("stop-listen".into(), t("stop-listen").into())], t("vinyl-listening"))
+        } else {
+            (vec![("listen".into(), t("listen").into()), ("encode".into(), t("encode-vinyl").into())], t("vinyl-ready"))
+        };
+        Offer {
+            handler: "vinyl".into(),
+            media: true,
+            handler_name: format!("{} — {name}", t("vinyl")),
+            tag: "vinyl".into(),
+            confidence: Confidence::Strong,
+            resolution: None,
+            target: None,
+            situation: None,
+            collision: false,
+            describe: jobj! {"status" => status, "device" => tt.as_ref().map(|x| x.wanted.clone())},
+            actions,
+            warnings: vec![],
+        }
+    }
+
+    /// État de la platine à jour (fin d'écoute ou d'encodage).
+    fn refresh_vinyl(&mut self) {
+        if let Some((_, c)) = self.listening.as_mut() {
+            if c.try_wait().ok().flatten().is_some() {
+                dl_log!(info, "vinyl", "écoute terminée");
+                self.listening = None;
+            }
+        }
+        if self.encoding.as_ref().is_some_and(|(_, pid)| !sys::pid_alive(*pid as i32)) {
+            dl_log!(info, "vinyl", "terminal d'encodage fermé");
+            self.encoding = None;
+        }
+        let devs: Vec<String> = self.drives.iter().filter(|(_, d)| d.vinyl.is_some() && d.offer.is_some()).map(|(k, _)| k.clone()).collect();
+        for dev in devs {
+            let o = self.vinyl_offer(&dev);
+            if self.drives.get(&dev).and_then(|d| d.offer.as_ref()).map(|x| &x.actions) != Some(&o.actions) {
+                self.drive(&dev).offer = Some(o);
+            }
+        }
+    }
+
+    fn remove_vinyl(&mut self, dev: &str) {
+        if self.listening.as_ref().is_some_and(|(d, _)| d == dev) {
+            if let Some((_, c)) = self.listening.take() {
+                crate::vinyl::stop_listen(c);
+            }
+        }
+        self.close_offer(dev);
+        self.drives.remove(dev);
+    }
+
     /// Actions sur le périphérique lui-même (sans proposition nécessaire) :
     /// tiroir, montage, gestionnaire de fichiers. Vrai si `key` en est une.
     fn perform_device(&mut self, dev: &str, key: &str) -> bool {
+        if let Some(tt) = self.drives.get(dev).and_then(|d| d.vinyl.clone()) {
+            match key {
+                "listen" => {
+                    if self.encoding.is_some() {
+                        self.error_notif(dev, t("vinyl-encoding"));
+                    } else if self.listening.is_none() {
+                        match crate::vinyl::start_listen(&tt, &paths::log_dir().join("vinylrip-listen.log")) {
+                            Ok(c) => {
+                                dl_log!(info, "vinyl", "écoute lancée", "card" => tt.card_id);
+                                self.listening = Some((dev.to_string(), c));
+                            }
+                            Err(e) => self.error_notif(dev, &format!("vinylrip listen : {e}")),
+                        }
+                    }
+                }
+                "stop-listen" => {
+                    if let Some((_, c)) = self.listening.take() {
+                        crate::vinyl::stop_listen(c);
+                        dl_log!(info, "vinyl", "écoute arrêtée");
+                    }
+                }
+                "encode" => {
+                    if self.listening.is_some() {
+                        self.error_notif(dev, t("vinyl-stop-first"));
+                    } else if self.encoding.is_none() {
+                        let argv = crate::vinyl::record_argv(&tt);
+                        match crate::terminal::command(&self.cfg, &argv) {
+                            Some(cmd) => match crate::generic::spawn_detached(&cmd, &paths::log_dir().join("vinylrip-record.log")) {
+                                Ok(pid) => {
+                                    dl_log!(info, "vinyl", "encodage lancé dans un terminal", "cmd" => cmd.join(" "));
+                                    self.encoding = Some((dev.to_string(), pid));
+                                }
+                                Err(e) => self.error_notif(dev, &e),
+                            },
+                            None => self.error_notif(dev, "aucun terminal trouvé (réglez [general] terminal_command)"),
+                        }
+                    }
+                }
+                k if k.starts_with(crate::custom::PREFIX) => return self.perform_custom(dev, k),
+                _ => {}
+            }
+            self.refresh_vinyl();
+            return true;
+        }
         if key.starts_with(crate::custom::PREFIX) {
+            return self.perform_custom(dev, key);
+        }
+        self.perform_device_rest(dev, key)
+    }
+
+    fn perform_custom(&mut self, dev: &str, key: &str) -> bool {
+        {
             let Some(a) = crate::custom::get(&self.cfg, key) else {
                 self.error_notif(dev, &format!("action inconnue : {key} (voir [actions] dans la configuration)"));
                 return true;
@@ -1318,8 +1503,11 @@ impl Daemon {
                 Ok(cmd) => dl_log!(info, "action", "action personnalisée lancée", "drive" => dev, "action" => a.name, "cmd" => cmd.join(" ")),
                 Err(e) => self.error_notif(dev, &e),
             }
-            return true;
+            true
         }
+    }
+
+    fn perform_device_rest(&mut self, dev: &str, key: &str) -> bool {
         match key {
             "open-files" => {
                 let cfg = self.cfg.clone();
@@ -1671,6 +1859,8 @@ pub fn offer_category(o: &Offer, ident: Option<&IdentResult>) -> &'static str {
         "cart"
     } else if o.handler == "usb" {
         "usb"
+    } else if o.handler == "vinyl" {
+        "vinyl"
     } else if o.handler == "data" || o.handler.starts_with("data-") {
         "data"
     } else if o.media {
@@ -1691,7 +1881,7 @@ pub fn resolve_autorun(order: &[String], actions: &[(String, String)], media: bo
     let has = |k: &str| actions.iter().any(|(a, _)| a == k);
     for word in order {
         let candidates: Vec<&str> = match word.as_str() {
-            "play" if media => vec!["play-disc"],
+            "play" if media => vec!["play-disc", "listen"],
             // Jeu multi-disques incomplet : « jouer » ne lance pas un jeu auquel
             // il manque ce disque ; l'ordre passe au dump.
             "play" if has("complete-game") => vec!["play-existing"],
@@ -1775,6 +1965,7 @@ pub fn offer_icons(o: &Offer, ident: Option<&IdentResult>) -> Vec<String> {
         match o.handler.as_str() {
             "usb" if o.describe["sd"].bool_or(false) => v.extend(["media-flash-sd-mmc", "media-flash", "drive-removable-media"]),
             "usb" => v.extend(["drive-removable-media-usb", "drive-removable-media"]),
+            "vinyl" => v.extend(["vinyl", "media-record", "audio-input-line", "audio-card", "audio-x-generic"]),
             "cdda" => v.extend(["media-optical-audio", "audio-x-generic"]),
             "dcim" | "photo-cd" => v.extend(["camera-photo", "folder-pictures", "image-x-generic"]),
             "dvd-video" | "dvd-vr" | "vcd" | "svcd" => v.extend(["media-optical-dvd-video", "media-optical-dvd", "media-optical-video", "video-x-generic"]),
@@ -1918,7 +2109,7 @@ pub fn offer_text(cfg: &Config, o: &Offer, ident: Option<&IdentResult>) -> (Stri
     if o.collision {
         lines.push(t("w-collision").into());
     }
-    if o.handler == "usb" {
+    if o.handler == "usb" || o.handler == "vinyl" {
         lines.push(o.describe["status"].str_or("").to_string());
     }
     for w in &o.warnings {

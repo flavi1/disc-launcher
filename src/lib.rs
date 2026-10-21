@@ -35,6 +35,7 @@ pub mod refdb;
 pub mod retroarch;
 pub mod sqlite;
 pub mod usb;
+pub mod vinyl;
 
 pub mod control;
 pub mod daemon;

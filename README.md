@@ -187,6 +187,15 @@ Les disques `sd*` amovibles ou reliés au bus USB (clés, disques durs, cartes m
 
 La Retrode est écartée (étiquette `RETRODE`, fichier `RETRODE.CFG` ou modèle USB). `[policy] usb = "ignore"` évite l'ouverture de la fenêtre au branchement ; le volume y reste listé.
 
+## Platine vinyle (vinylrip)
+
+Si [vinylrip](https://github.com/flavi1/vinylrip) est installé et que sa configuration (`~/.config/vinylrip/config.toml`) désigne une platine (`device = "…"`), disc-launcher la traite comme un disque de plus, de type « Vinyle », dès que sa carte son est branchée. La carte est reconnue comme le fait vinylrip : identifiant ALSA (`arecord -l`), `vendeur:produit` USB, ou partie du nom. Sans `device` dans la configuration de vinylrip, rien n'est détecté.
+
+- **Écouter** : `vinylrip listen` (arecord vers aplay, comme l'extension vinylrip-kodi), jusqu'à **Arrêter l'écoute**.
+- **Encoder (vinylrip)** : `vinylrip record` dans un terminal, interactif (Entrée pour démarrer et terminer chaque face, puis découpage, identification et FLAC vérifié). Indisponible pendant l'écoute ; la platine n'a plus d'action tant que le terminal est ouvert.
+
+Catégorie d'autorun : `vinyl` (`play` y vaut « Écouter »). Si PipeWire ou PulseAudio tient la carte, l'accès direct d'arecord échoue : c'est une limite connue de vinylrip.
+
 ## Gestionnaire de fichiers
 
 « Ouvrir dans le gestionnaire de fichiers » est proposé pour les disques de données, les disques de fichiers (musique, vidéo, `DCIM`), les DVD et Blu-ray vidéo, la Retrode et les volumes USB. Le disque est d'abord monté par udisks2 s'il ne l'est pas. Le gestionnaire est choisi ainsi :
@@ -204,11 +213,11 @@ La fenêtre **« Disques et périphériques »** (`disc-launcher-panel`) liste, 
 - les **cartouches** de la Retrode et les **volumes USB** (barre d'espace libre) ;
 - les **tâches** en cours (dump, vérification, conversion), avec leur progression et « Annuler ».
 
-Elle s'ouvre à l'insertion d'un disque, d'une cartouche ou d'un volume, et se ferme dès qu'une action est choisie. Exception : sur un lecteur à plateau motorisé (détecté par le noyau), « Éjecter » ou « Ouvrir le plateau » la laissent ouverte, le temps de poser le disque et de cliquer sur « Fermer le plateau ». Chaque élément a son icône (cartouche selon la console, CD audio, photos, DVD et Blu-ray vidéo, carte mémoire, clé USB…), prise dans le thème d'icônes du bureau. L'**icône de la zone de notification** (icône d'éjection) l'affiche ou la masque, d'un clic gauche ou droit. Exemple : « Lire avec Kodi », puis on quitte Kodi et un clic sur l'icône rouvre la fenêtre. Une éjection faite hors de disc-launcher (bouton du lecteur) est prise en compte en deux secondes au plus. Les fins de tâche restent signalées par une notification.
+Sa hauteur suit son contenu, sans défilement tant qu'elle ne dépasse pas 90 % de la hauteur de l'écran. Elle s'ouvre à l'insertion d'un disque, d'une cartouche ou d'un volume, et se ferme dès qu'une action est choisie. Exception : sur un lecteur à plateau motorisé (détecté par le noyau), « Éjecter » ou « Ouvrir le plateau » la laissent ouverte, le temps de poser le disque et de cliquer sur « Fermer le plateau ». Chaque élément a son icône (cartouche selon la console, CD audio, photos, DVD et Blu-ray vidéo, carte mémoire, clé USB…), prise dans le thème d'icônes du bureau. L'**icône de la zone de notification** (icône d'éjection) l'affiche ou la masque, d'un clic gauche ou droit. Exemple : « Lire avec Kodi », puis on quitte Kodi et un clic sur l'icône rouvre la fenêtre. Une éjection faite hors de disc-launcher (bouton du lecteur) est prise en compte en deux secondes au plus. Les fins de tâche restent signalées par une notification.
 
 La fenêtre utilise GTK 3, chargé à l'exécution : présent sur presque tous les bureaux (sous Plasma, le thème Breeze GTK lui donne l'apparence de KDE). Sans GTK 3 ou sans affichage, les propositions passent par les notifications, puis par kdialog, zenity ou yad ; `[ui] panel = "notifications"` force ce mode.
 
-L'icône suit la norme StatusNotifierItem, sans bibliothèque graphique. Elle s'affiche sous KDE Plasma, LXQt, Xfce (greffon « Zone de notification » ou « Status Notifier Plugin »), Cinnamon, MATE (applet Ayatana), Budgie, et sous GNOME avec l'extension « AppIndicator and KStatusNotifierItem Support » (installée d'office par Ubuntu). **LXDE** (lxpanel) et GNOME sans extension n'affichent pas ces icônes ; la fenêtre s'ouvre tout de même à chaque insertion. Sans disque ni volume, l'icône passe à l'état « passif » (rangée parmi les icônes masquées). `[tray] enabled = false` la désactive.
+L'icône suit la norme StatusNotifierItem, sans bibliothèque graphique. Elle s'affiche sous KDE Plasma, LXQt, Xfce (greffon « Zone de notification » ou « Status Notifier Plugin »), Cinnamon, MATE (applet Ayatana), Budgie, et sous GNOME avec l'extension « AppIndicator and KStatusNotifierItem Support » (installée d'office par Ubuntu). **LXDE** (lxpanel) et GNOME sans extension n'affichent pas ces icônes ; la fenêtre s'ouvre tout de même à chaque insertion. L'icône reste affichée tant qu'un lecteur à plateau motorisé est présent, même vide (pour pouvoir ouvrir le plateau) ; sans disque, volume ni lecteur à plateau, elle passe à l'état « passif » (rangée parmi les icônes masquées). `[tray] enabled = false` la désactive.
 
 Réinsérer un disque, même le même, rouvre toujours la fenêtre.
 
@@ -341,7 +350,7 @@ order = ["play", "dump-then-play"]   # par défaut : jouer la copie si elle exis
 | `open` | ouvrir dans le gestionnaire de fichiers |
 | autre | une clé d'action : `play-disc` (jouer depuis le disque), `custom:rip-cd`… |
 
-`enabled` et `order` se règlent pour tous les médias (`[autorun]`), par catégorie (`console`, `cart`, `media`, `data`, `usb`) ou par gestionnaire (`psx`, `cdda`, `dvd-video`…), du plus précis au plus général :
+`enabled` et `order` se règlent pour tous les médias (`[autorun]`), par catégorie (`console`, `cart`, `media`, `data`, `usb`, `vinyl`) ou par gestionnaire (`psx`, `cdda`, `dvd-video`…), du plus précis au plus général :
 
 ```toml
 [autorun]
@@ -451,6 +460,7 @@ src/dbus.rs                 client et service D-Bus (notifications, logind, udis
 src/tray.rs panel.rs        icône StatusNotifierItem ; pilotage de la fenêtre
 src/bin/disc-launcher-panel.rs   fenêtre « Disques et périphériques » (GTK 3 chargé à l'exécution)
 src/usb.rs filemanager.rs   volumes USB ; ouverture dans le gestionnaire de fichiers
+src/vinyl.rs                platine vinyle (vinylrip)
 src/device/                 lecteur réel (SG_IO), images .iso/.cue, source mémoire
 src/fs/                     ISO 9660, UDF (jusqu'à 2.60, Blu-ray), XDVDFS, dossier monté
 src/identify/               classificateur : TOC, signatures déclaratives, sondes, profils

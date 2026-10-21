@@ -88,6 +88,17 @@ gtk_api! {
     gtk_scrolled_window_set_policy: fn(P, c_int, c_int);
     gtk_scrolled_window_set_propagate_natural_height: fn(P, GBool);
     gtk_scrolled_window_set_max_content_height: fn(P, c_int);
+    gtk_scrolled_window_set_min_content_height: fn(P, c_int);
+    gtk_widget_get_preferred_height_for_width: fn(P, c_int, *mut c_int, *mut c_int);
+    gtk_widget_get_allocated_width: fn(P) -> c_int;
+    gtk_widget_get_window: fn(P) -> P;
+    gtk_window_resize: fn(P, c_int, c_int);
+    gdk_display_get_default: fn() -> P;
+    gdk_display_get_monitor_at_window: fn(P, P) -> P;
+    gdk_display_get_primary_monitor: fn(P) -> P;
+    gdk_display_get_monitor: fn(P, c_int) -> P;
+    gdk_monitor_get_workarea: fn(P, *mut [c_int; 4]);
+    gtk_window_move: fn(P, c_int, c_int);
     gtk_button_new_from_icon_name: fn(*const c_char, c_int) -> P;
     gtk_icon_theme_get_default: fn() -> P;
     gtk_icon_theme_has_icon: fn(P, *const c_char) -> GBool;
@@ -150,6 +161,7 @@ struct Live {
 
 struct Ui {
     window: P,
+    scroller: P,
     holder: P,
     list: P,
     /// Forme de la liste (identifiants, actions, barres) : la reconstruire
@@ -343,13 +355,65 @@ fn build(ui: &mut Ui, state: &Value) {
     }
 }
 
+/// Zone de travail (x, y, largeur, hauteur) de l'écran de la fenêtre, sans les panneaux.
+fn workarea(ui: &Ui) -> [c_int; 4] {
+    let g = g();
+    unsafe {
+        let display = (g.gdk_display_get_default)();
+        if display.is_null() {
+            return [0, 0, 1920, 1080];
+        }
+        let gdkwin = (g.gtk_widget_get_window)(ui.window);
+        let mut mon = if gdkwin.is_null() { std::ptr::null_mut() } else { (g.gdk_display_get_monitor_at_window)(display, gdkwin) };
+        if mon.is_null() {
+            mon = (g.gdk_display_get_primary_monitor)(display);
+        }
+        if mon.is_null() {
+            mon = (g.gdk_display_get_monitor)(display, 0);
+        }
+        if mon.is_null() {
+            return [0, 0, 1920, 1080];
+        }
+        let mut r = [0 as c_int; 4];
+        (g.gdk_monitor_get_workarea)(mon, &mut r);
+        if r[3] > 100 {
+            r
+        } else {
+            [0, 0, 1920, 1080]
+        }
+    }
+}
+
+/// Ajuste la hauteur au contenu : pas de défilement tant que la fenêtre ne
+/// dépasse pas 90 % de la hauteur disponible (barre de titre comprise).
+fn fit(ui: &Ui) {
+    let g = g();
+    unsafe {
+        let wa = workarea(ui);
+        let max_h = (wa[3] * 9 / 10 - 48).max(200);
+        let w = (g.gtk_widget_get_allocated_width)(ui.scroller);
+        let width = if w > 50 { w } else { 480 };
+        let (mut min, mut nat) = (0 as c_int, 0 as c_int);
+        (g.gtk_widget_get_preferred_height_for_width)(ui.holder, width, &mut min, &mut nat);
+        let h = nat.max(min).min(max_h).max(60);
+        (g.gtk_scrolled_window_set_max_content_height)(ui.scroller, max_h);
+        (g.gtk_scrolled_window_set_min_content_height)(ui.scroller, h);
+        // Ramener la fenêtre à sa taille minimale : exactement le contenu.
+        (g.gtk_window_resize)(ui.window, width, 1);
+        // Recentrer dans la zone de travail (X11 ; sous Wayland, le compositeur place).
+        let total = h + 8 + 40;
+        (g.gtk_window_move)(ui.window, wa[0] + (wa[2] - width - 8).max(0) / 2, wa[1] + (wa[3] - total).max(0) / 2);
+    }
+}
+
 fn refresh(ui: &mut Ui, state: &Value) {
     let g = g();
     unsafe {
         (g.gtk_window_set_title)(ui.window, cs(state["title"].str_or("disc-launcher")).as_ptr());
     }
     let shape = shape_of(state);
-    if shape != ui.shape {
+    let rebuilt = shape != ui.shape;
+    if rebuilt {
         build(ui, state);
         ui.shape = shape;
     } else {
@@ -369,10 +433,14 @@ fn refresh(ui: &mut Ui, state: &Value) {
         }
     }
     let want = state["visible"].bool_or(false);
+    if rebuilt || (want && !ui.visible) {
+        fit(ui);
+    }
     unsafe {
         if want && !ui.visible {
             (g.gtk_widget_show_all)(ui.window);
             (g.gtk_window_present)(ui.window);
+            fit(ui);
         } else if !want && ui.visible {
             (g.gtk_widget_hide)(ui.window);
         } else if want && state["raise"].bool_or(false) {
@@ -436,7 +504,7 @@ fn main() {
         let sw = (g.gtk_scrolled_window_new)(std::ptr::null_mut(), std::ptr::null_mut());
         (g.gtk_scrolled_window_set_policy)(sw, POLICY_NEVER, POLICY_AUTOMATIC);
         (g.gtk_scrolled_window_set_propagate_natural_height)(sw, 1);
-        (g.gtk_scrolled_window_set_max_content_height)(sw, 640);
+        (g.gtk_scrolled_window_set_max_content_height)(sw, 900);
         (g.gtk_container_add)(win, sw);
         let holder = (g.gtk_box_new)(VERTICAL, 0);
         (g.gtk_container_set_border_width)(holder, 4);
@@ -444,7 +512,7 @@ fn main() {
         let list = (g.gtk_box_new)(VERTICAL, 0);
         (g.gtk_box_pack_start)(holder, list, 1, 1, 0);
         (g.gtk_widget_set_can_focus)(holder, 0);
-        UI.with(|u| *u.borrow_mut() = Some(Ui { window: win, holder, list, shape: "\u{0}".into(), live: vec![], visible: false }));
+        UI.with(|u| *u.borrow_mut() = Some(Ui { window: win, scroller: sw, holder, list, shape: "\u{0}".into(), live: vec![], visible: false }));
     }
     let inbox: Inbox = Arc::new(Mutex::new((None, false)));
     let _ = INBOX.set(inbox.clone());

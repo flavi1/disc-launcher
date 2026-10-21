@@ -88,7 +88,7 @@ enabled = false
 # dump, open (gestionnaire de fichiers), ou une clé d'action (play-disc,
 # custom:rip-cd…).
 order = ["play", "dump-then-play"]
-# Par catégorie (console, cart, media, data, usb) ou par gestionnaire (psx,
+# Par catégorie (console, cart, media, data, usb, vinyl) ou par gestionnaire (psx,
 # cdda, dvd-video…), du plus précis au plus général :
 # [autorun.media]
 # enabled = true

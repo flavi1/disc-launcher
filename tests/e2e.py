@@ -350,6 +350,52 @@ with open({states!r}, "a") as log:
     bus.terminate()
     os.remove(os.path.join(HOME, ".config/disc-launcher/config.toml"))
 
+# 5c. Platine vinyle (vinylrip simulé) : détection d'après la configuration de
+# vinylrip, écoute / arrêt, encodage dans un terminal, débranchement.
+cards = os.path.join(ROOT, "asound-cards")
+write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n 1 [Device         ]: USB-Audio - USB Audio CODEC\n")
+write(os.path.join(HOME, ".config/vinylrip/config.toml"), 'device = "Device"\n')
+write(os.path.join(FAKE, "vinylrip"), f"""#!/bin/sh
+case "$*" in
+  *listen*) echo listening > {ROOT}/vinyl-listen; cat > /dev/null; echo stopped > {ROOT}/vinyl-listen ;;
+  *record*) echo "$*" > {ROOT}/vinyl-record ;;
+esac
+""", 0o755)
+write(os.path.join(FAKE, "faketerm"), "#!/bin/sh\nshift\nexec \"$@\"\n", 0o755)
+write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nterminal_command = ["{FAKE}/faketerm", "-e"]\n')
+d = subprocess.Popen([os.path.join(BIN, "disc-launcherd"), "--foreground"], env=dict(ENV, DISC_LAUNCHER_ASOUND_CARDS=cards), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def vinyl_drive():
+    try:
+        st = json.loads(run("disc-launcher", "status", "--json", check=False).stdout or "{}")
+    except ValueError:
+        return None
+    v = [x for x in st.get("drives", []) if x.get("device", "").startswith("vinyl:")]
+    return v[0] if v else None
+def wait_for(pred, n=60):
+    for _ in range(n):
+        r = pred()
+        if r:
+            return r
+        time.sleep(0.2)
+    return None
+v = wait_for(lambda: (lambda x: x if x and x.get("offer") else None)(vinyl_drive()))
+check(v is not None and v["device"] == "vinyl:Device" and v["offer"]["actions"] == ["listen", "encode"], "vinyle : platine de la configuration vinylrip détectée (Écouter, Encoder)")
+run("disc-launcher", "run", "listen", "vinyl:Device", check=False)
+got = wait_for(lambda: os.path.exists(os.path.join(ROOT, "vinyl-listen")) and open(os.path.join(ROOT, "vinyl-listen")).read().strip() == "listening" and (vinyl_drive() or {}).get("offer", {}).get("actions") == ["stop-listen"])
+check(bool(got), "vinyle : écoute lancée (vinylrip listen) ; encodage indisponible pendant l'écoute")
+run("disc-launcher", "run", "stop-listen", "vinyl:Device", check=False)
+got = wait_for(lambda: open(os.path.join(ROOT, "vinyl-listen")).read().strip() == "stopped" and (vinyl_drive() or {}).get("offer", {}).get("actions") == ["listen", "encode"])
+check(bool(got), "vinyle : écoute arrêtée (entrée fermée)")
+run("disc-launcher", "run", "encode", "vinyl:Device", check=False)
+got = wait_for(lambda: os.path.exists(os.path.join(ROOT, "vinyl-record")) and open(os.path.join(ROOT, "vinyl-record")).read().strip() == "record --device Device")
+check(bool(got), "vinyle : encodage par vinylrip record dans un terminal")
+write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n")
+check(wait_for(lambda: vinyl_drive() is None) is not None, "vinyle : platine débranchée → retirée")
+d.send_signal(signal.SIGTERM)
+d.wait(timeout=10)
+os.remove(os.path.join(HOME, ".config/disc-launcher/config.toml"))
+os.remove(os.path.join(FAKE, "vinylrip"))
+
 dlog = open(os.path.join(state_dir, "log", "daemon.log")).read()
 check("msg=démarrage" in dlog and "msg=arrêt" in dlog and "msg=capabilities" in dlog, "démon : journal interne (démarrage, capacités, arrêt)")
 
