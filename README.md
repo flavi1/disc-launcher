@@ -225,6 +225,32 @@ Si [vinylrip](https://github.com/flavi1/vinylrip) est installé et que sa config
 
 Catégorie d'autorun : `vinyl` (`play` y vaut « Écouter »). Si PipeWire ou PulseAudio tient la carte, l'accès direct d'arecord échoue : c'est une limite connue de vinylrip.
 
+## Encodage : CD audio, DVD et Blu-ray (encbd)
+
+Si [encbd](https://github.com/flavi1/encbd) est installé (`encbd` ou `encbd.appimage` dans le PATH), les CD audio, DVD et Blu-ray vidéo reçoivent l'action **Encoder (encbd)** : FLAC pour un CD, MKV pour un film, dans le dossier Musique ou Vidéos de l'utilisateur (xdg-user-dirs).
+
+Avant tout encodage, disc-launcher demande à encbd le nom prévu (`encbd --identify --json`) et l'affiche dans la proposition, avec sa source :
+
+- film : TheDiscDB (empreinte du disque), métadonnées de l'éditeur (`bdmt_*.xml`, toutes langues), label du volume, puis TMDb (si une clé est configurée dans encbd) et Wikidata pour le titre localisé et l'année. Les noms génériques (« LOGICAL_VOLUME_ID », « Blu-ray », « DVD_VIDEO »…) sont écartés ; faute de nom, encbd le demandera dans son terminal ;
+- CD audio : identifiant MusicBrainz calculé depuis la table des matières, puis édition et dossier d'album (`Artiste/Album`).
+
+Une copie déjà présente est reconnue sans tenir compte de la casse, des accents ni des mentions entre crochets : `Avatar (2009) [3D] [VFF].mkv` vaut `Avatar (2009)`, `Album [FLAC]` vaut `Album`. La proposition affiche alors « Copie existante », avec **Lire la copie** (film) ou **Ouvrir l'album** (CD), et **Réencoder (encbd)**.
+
+À l'encodage, disc-launcher impose à encbd le nom retenu (`--title`/`--year` pour un film, `--release` pour un CD) : le fichier produit porte le nom annoncé. La copie est enregistrée dans la collection de disc-launcher, rattachée à l'empreinte du disque : elle est retrouvée au passage suivant, même hors ligne. encbd, lui, ne lit aucune base de disc-launcher et reste utilisable seul.
+
+L'encodage se suit dans un terminal (`[general] terminal_command`). Dans l'autorun, `dump` (ou `encode`) désigne cet encodage pour les médias. Réglages facultatifs :
+
+```toml
+[encbd]
+enabled = true              # false : action masquée
+command = ["encbd"]         # défaut : encbd, puis encbd.appimage
+music_dir = "~/Musique"     # défaut : dossier Musique de l'utilisateur
+video_dir = "~/Vidéos"      # défaut : dossier Vidéos de l'utilisateur
+online = false              # sans TheDiscDB, TMDb, Wikidata ni MusicBrainz (défaut : réglage d'encbd)
+```
+
+`[online]` de disc-launcher ne concerne que ses propres bases (jeux) ; les recherches d'encbd suivent son réglage `ONLINE_LOOKUP`, ou `online` ci-dessus. `disc-launcher doctor` indique la commande et les dossiers retenus.
+
 ## Gestionnaire de fichiers
 
 « Ouvrir dans le gestionnaire de fichiers » est proposé pour les disques de données, les disques de fichiers (musique, vidéo, `DCIM`), les DVD et Blu-ray vidéo, la Retrode et les volumes USB. Le disque est d'abord monté par udisks2 s'il ne l'est pas. Le gestionnaire est choisi ainsi :
@@ -256,18 +282,19 @@ Toute commande peut devenir une action de plus dans la fenêtre (ou les notifica
 
 ```toml
 # ~/.config/disc-launcher/config.toml
-[actions.rip-cd]
-label = "Ripper le CD audio"
-handlers = ["cdda"]                         # gestionnaires concernés ; "*" = tous
-command = 'encbd "$DL_DEVICE" ~/Musique'    # chaîne : exécutée par sh -c
-terminal = true                             # suivre la commande dans un terminal
+[actions.copie]
+label = "Copier le disque"
+handlers = ["data", "usb"]                          # gestionnaires concernés ; "*" = tous
+command = 'cp -r "$DL_MOUNT" ~/Copies/"$DL_LABEL"'  # chaîne : exécutée par sh -c
+terminal = true                                     # suivre la commande dans un terminal
 ```
 
 - `handlers` : identifiants de gestionnaires (`cdda`, `dvd-video`, `psx`…), plus `data` (disque de données) et `usb` (volume USB) ; `disc-launcher identify` affiche l'identifiant d'un disque.
 - `command` en **chaîne** : exécutée par `sh -c` avec les variables `DL_*` des gestionnaires (`DL_DEVICE`, `DL_MOUNT`, `DL_LABEL`, `DL_EXISTING`, `DL_NAME`, `DL_SYSTEM`…, voir [docs/handlers.md](docs/handlers.md)) ; `~` y est développé par le shell.
 - `command` en **liste** : arguments avec les gabarits `{device}`, `{mount}`, `{existing}`, `{label}`, `{name}`, `{handler}`, `{roms}` (et `~` en début d'argument), sans shell.
 - La commande est lancée détachée ; sa sortie va dans `~/.local/state/disc-launcher/log/action-<nom>.log`, ou s'affiche dans un terminal avec `terminal = true`.
-- Elle s'essaie sans la fenêtre : `disc-launcher run custom:rip-cd /dev/sr0`.
+- Elle s'essaie sans la fenêtre : `disc-launcher run custom:copie /dev/sr0`.
+- Pour encoder un CD audio, un DVD ou un Blu-ray avec encbd, inutile d'ajouter une action : elle est intégrée (voir plus haut), avec le nom prévu et la détection des copies existantes. Une ancienne action `[actions.rip-cd]` appelant encbd peut être retirée.
 
 ## Gestionnaires
 
@@ -375,9 +402,9 @@ order = ["play", "dump-then-play"]   # par défaut : jouer la copie si elle exis
 | --- | --- |
 | `play` | jeu : lancer la copie présente dans `~/ROMs` ; média (CD audio, DVD, Blu-ray) : lire le disque |
 | `dump-then-play` | dumper puis jouer (disque manquant d'un jeu multi-disques : le dumper) |
-| `dump` | dumper sans jouer |
+| `dump` | dumper sans jouer ; média (CD audio, DVD, Blu-ray) : encoder avec encbd (aussi : `encode`) |
 | `open` | ouvrir dans le gestionnaire de fichiers |
-| autre | une clé d'action : `play-disc` (jouer depuis le disque), `custom:rip-cd`… |
+| autre | une clé d'action : `play-disc` (jouer depuis le disque), `custom:copie`… |
 
 `enabled` et `order` se règlent pour tous les médias (`[autorun]`), par catégorie (`console`, `cart`, `media`, `data`, `usb`, `vinyl`) ou par gestionnaire (`psx`, `cdda`, `dvd-video`…), du plus précis au plus général :
 
@@ -491,6 +518,7 @@ src/tray.rs panel.rs        icône StatusNotifierItem ; pilotage de la fenêtre
 src/bin/disc-launcher-panel.rs   fenêtre « Disques et périphériques » (GTK 3 chargé à l'exécution)
 src/usb.rs filemanager.rs   volumes USB ; ouverture dans le gestionnaire de fichiers
 src/vinyl.rs                platine vinyle (vinylrip)
+src/encbd.rs                encodage CD audio, DVD, Blu-ray (encbd) : nom prévu, copies existantes
 data/icons/                 icônes de repli (SVG)
 packaging/                  paquets Debian (build-deb.sh) et Arch (PKGBUILD)
 .github/workflows/          tests (ci.yml) ; paquets et publication (paquets.yml)

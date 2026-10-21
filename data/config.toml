@@ -46,11 +46,20 @@ panel = "auto"
 # panel_command = []
 
 # Actions personnalisées, ajoutées aux propositions (voir le README) :
-# [actions.rip-cd]
-# label = "Ripper le CD audio"
-# handlers = ["cdda"]
-# command = 'encbd "$DL_DEVICE" ~/Musique'
+# [actions.copie]
+# label = "Copier le disque"
+# handlers = ["data", "usb"]
+# command = 'cp -r "$DL_MOUNT" ~/Copies/"$DL_LABEL"'
 # terminal = true
+
+# Encodage des CD audio, DVD et Blu-ray par encbd, s'il est installé : nom
+# prévu affiché, copies existantes reconnues (mentions [..] ignorées).
+# [encbd]
+# enabled = true
+# command = ["encbd"]        # défaut : encbd, puis encbd.appimage
+# music_dir = "~/Musique"    # défaut : dossiers xdg-user-dirs
+# video_dir = "~/Vidéos"
+# online = false             # défaut : réglage d'encbd (ONLINE_LOOKUP)
 
 [tray]
 # Icône de la zone de notification (StatusNotifierItem) : un clic affiche ou
@@ -85,8 +94,8 @@ cache_days = 90
 # s'affiche. Désactivé par défaut.
 enabled = false
 # Mots : play (copie existante d'un jeu, ou lecture d'un média), dump-then-play,
-# dump, open (gestionnaire de fichiers), ou une clé d'action (play-disc,
-# custom:rip-cd…).
+# dump (média : encodage par encbd), open (gestionnaire de fichiers), ou une clé
+# d'action (play-disc, custom:copie…).
 order = ["play", "dump-then-play"]
 # Par catégorie (console, cart, media, data, usb, vinyl) ou par gestionnaire (psx,
 # cdda, dvd-video…), du plus précis au plus général :
