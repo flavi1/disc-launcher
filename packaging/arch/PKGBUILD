@@ -23,6 +23,7 @@ optdepends=(
   'retroarch: émulateur par défaut'
 )
 backup=('etc/disc-launcher/config.toml' 'etc/disc-launcher/helper-tools.toml')
+options=('!debug')
 install=disc-launcher.install
 source=("$pkgname-$pkgver.tar.gz::https://github.com/flavi1/disc-launcher/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
