@@ -396,6 +396,15 @@ d.wait(timeout=10)
 os.remove(os.path.join(HOME, ".config/disc-launcher/config.toml"))
 os.remove(os.path.join(FAKE, "vinylrip"))
 
+# Coquilles natives : inactives par défaut, activables et retirables par l'utilisateur.
+solid = os.path.join(HOME, ".local/share/solid/actions/disc-launcher-play.desktop")
+gio = os.path.join(HOME, ".local/share/applications/disc-launcher-play.desktop")
+check("inactives" in run("disc-launcher", "native").stdout and not os.path.exists(solid), "coquilles natives : inactives par défaut")
+run("disc-launcher", "native", "enable")
+check(os.path.exists(solid) and os.path.exists(gio) and "actives" in run("disc-launcher", "native").stdout, "coquilles natives : activées (Solid + GIO)")
+run("disc-launcher", "native", "disable")
+check(not os.path.exists(solid) and not os.path.exists(gio), "coquilles natives : retirées")
+
 dlog = open(os.path.join(state_dir, "log", "daemon.log")).read()
 check("msg=démarrage" in dlog and "msg=arrêt" in dlog and "msg=capabilities" in dlog, "démon : journal interne (démarrage, capacités, arrêt)")
 

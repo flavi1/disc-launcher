@@ -87,7 +87,7 @@ L'installation dépose :
 
 Variantes :
 
-- `sudo make install-native` ajoute les « coquilles » natives Solid et GIO (« Lire le disque »), pour le mode `hybride`.
+- **Coquilles natives** (mode `hybride`) : entrée « Lire le disque (disc-launcher) » dans le notificateur de Plasma (action Solid) et dans les choix d'application de GNOME, Cinnamon, MATE… (GIO). Installées par `make install` et par les paquets, mais **inactives** : `disc-launcher native enable` les active pour votre compte, `disc-launcher native disable` les retire, `disc-launcher native` donne l'état. À n'activer qu'en mode `hybride` (`[general] mode = "hybride"`), où le bureau propose la lecture des médias et disc-launcher ne se manifeste que pour les jeux ; en mode `daemon` (défaut), la fenêtre propose déjà la lecture et chaque média le serait deux fois. `sudo make install-native` les active pour tout le système.
 - `make install-user` installe dans `~/.local`, sans root et sans assistant privilégié.
 
 ## Outils externes
@@ -446,6 +446,7 @@ disc-launcher watch [id]                 suivre une tâche en clair (la dernièr
 disc-launcher log [-f] [--job <id>] [--level warn] [--json]
 disc-launcher handlers [id]              exécutable retenu pour chaque verbe
 disc-launcher reload                     relire la configuration
+disc-launcher native [enable|disable]    coquilles natives Plasma/GNOME (mode hybride), inactives par défaut
 disc-launcher rom info <fichier>         cartouche : système, en-tête, empreinte, nom
 disc-launcher refdb fetch [système…]     noms et numéros de série Redump (libretro) ; tous par défaut
 disc-launcher refdb                      contenu de la base de référence

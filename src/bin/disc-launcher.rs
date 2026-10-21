@@ -33,6 +33,7 @@ const USAGE: &str = "usage : disc-launcher <commande> [options]
   handlers [id]                      exécutable retenu pour chaque verbe
   reload                             relit la configuration du démon
   doctor                             capacités, lecteurs, gestionnaires, outils
+  native [status|enable|disable]     coquilles natives Plasma/GNOME « Lire le disque » (mode hybride)
 ";
 
 fn die(msg: &str) -> ! {
@@ -142,6 +143,36 @@ fn main() {
                 let (summary, body) = daemon::offer_text(&cfg, &o, Some(&r));
                 println!("\n{summary}\n{body}");
                 println!("actions : {}", o.actions.iter().map(|a| a.0.as_str()).collect::<Vec<_>>().join(", "));
+            }
+        }
+        "native" => {
+            use disclauncher::native;
+            let mode = Config::load().mode().name().to_string();
+            match positional.first().map(|s| s.as_str()).unwrap_or("status") {
+                "enable" => match native::enable() {
+                    Ok(files) => {
+                        for f in files {
+                            println!("installé : {}", f.display());
+                        }
+                        if mode != "hybride" {
+                            println!("Note : mode actuel « {mode} ». Les coquilles ne servent qu'en mode hybride ; sinon chaque média est proposé deux fois.\nActivez-le dans ~/.config/disc-launcher/config.toml : [general] mode = \"hybride\", puis disc-launcher reload.");
+                        }
+                    }
+                    Err(e) => die(&e),
+                },
+                "disable" => {
+                    for f in native::disable() {
+                        println!("retiré : {}", f.display());
+                    }
+                }
+                "status" => {
+                    println!("coquilles natives : {}", if native::enabled() { "actives (profil utilisateur)" } else { "inactives" });
+                    if native::system_wide() {
+                        println!("installées aussi pour tout le système (make install-native)");
+                    }
+                    println!("mode : {mode}");
+                }
+                o => die(&format!("native : sous-commande inconnue « {o} » (status | enable | disable)")),
             }
         }
         "refresh" => {
@@ -362,6 +393,7 @@ fn doctor() {
         },
     };
     println!("fenêtre        : {panel}");
+    println!("coquilles nat. : {}", if disclauncher::native::enabled() || disclauncher::native::system_wide() { "actives (disc-launcher native disable pour les retirer)" } else { "inactives (disc-launcher native enable, pour le mode hybride)" });
     println!("dialogue       : {}", disclauncher::notify::dialog_tool().unwrap_or("aucun"));
     println!("pkexec         : {}", if paths::which("pkexec").is_some() { "oui" } else { "non" });
     {

@@ -62,6 +62,9 @@ install: built
 	install -m 644 data/desktop/disc-launcherd-autostart.desktop $(DESTDIR)$(SYSCONFDIR)/xdg/autostart/disc-launcherd.desktop
 	install -d $(DESTDIR)$(DATADIR)/applications $(DESTDIR)$(POLKITACTIONSDIR) $(DESTDIR)$(POLKITRULESDIR)
 	install -m 644 data/desktop/disc-launcher.desktop $(DESTDIR)$(DATADIR)/applications/disc-launcher.desktop
+	@# Coquilles natives (mode hybride) : modèles inactifs ; « disc-launcher native enable » les active.
+	install -d $(DESTDIR)$(DATADIR)/disc-launcher/native
+	install -m 644 data/desktop/disc-launcher-play-solid.desktop data/desktop/disc-launcher-play-gio.desktop $(DESTDIR)$(DATADIR)/disc-launcher/native/
 	install -d $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps
 	install -m 644 data/icons/hicolor/scalable/apps/*.svg $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/
 	-[ -n "$(DESTDIR)" ] || gtk-update-icon-cache -q -t $(DATADIR)/icons/hicolor 2>/dev/null
@@ -100,6 +103,8 @@ install-user: build
 	install -m 644 data/handlers/data/*.toml $(HOME)/.local/share/disc-launcher/handlers/data/
 	install -m 644 data/signatures/*.toml $(HOME)/.local/share/disc-launcher/signatures/
 	install -m 644 data/drive-profiles.toml $(HOME)/.local/share/disc-launcher/
+	install -d $(HOME)/.local/share/disc-launcher/native
+	install -m 644 data/desktop/disc-launcher-play-solid.desktop data/desktop/disc-launcher-play-gio.desktop $(HOME)/.local/share/disc-launcher/native/
 	sed 's|^Exec=disc-launcherd|Exec=$(HOME)/.local/bin/disc-launcherd|' data/desktop/disc-launcherd-autostart.desktop > $(HOME)/.config/autostart/disc-launcherd.desktop
 	install -d $(HOME)/.local/share/icons/hicolor/scalable/apps
 	install -m 644 data/icons/hicolor/scalable/apps/*.svg $(HOME)/.local/share/icons/hicolor/scalable/apps/
