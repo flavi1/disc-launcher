@@ -36,6 +36,14 @@ pub fn t(key: &str) -> &'static str {
         "safe-remove" => "Retirer en toute sécurité", "Safely remove";
         "usb-key" => "Volume USB", "USB volume";
         "sd-card" => "Carte mémoire", "Memory card";
+        "vinyl" => "Vinyle", "Vinyl";
+        "listen" => "Écouter", "Listen";
+        "stop-listen" => "Arrêter l'écoute", "Stop listening";
+        "encode-vinyl" => "Encoder (vinylrip)", "Encode (vinylrip)";
+        "vinyl-ready" => "Platine prête", "Turntable ready";
+        "vinyl-listening" => "Écoute en cours", "Listening";
+        "vinyl-encoding" => "Encodage en cours dans le terminal vinylrip", "Encoding in the vinylrip terminal";
+        "vinyl-stop-first" => "Arrêtez l'écoute avant d'encoder", "Stop listening before encoding";
         "safe-to-remove" => "Vous pouvez retirer ce périphérique en toute sécurité.", "This device can be safely removed.";
         "free-of" => "libres sur", "free of";
         "open-tray" => "Ouvrir le plateau", "Open tray";
