@@ -1960,13 +1960,13 @@ pub fn offer_icons(o: &Offer, ident: Option<&IdentResult>) -> Vec<String> {
             "gamegear" => &["application-x-gamegear-rom"][..],
             _ => &[][..],
         });
-        v.extend(["input-gaming", "media-flash"]);
+        v.extend(["disc-launcher-fallback-cartridge", "input-gaming", "media-flash"]);
     } else {
         match o.handler.as_str() {
             "usb" if o.describe["sd"].bool_or(false) => v.extend(["media-flash-sd-mmc", "media-flash", "drive-removable-media"]),
             "usb" => v.extend(["drive-removable-media-usb", "drive-removable-media"]),
-            "vinyl" => v.extend(["vinyl", "media-record", "audio-input-line", "audio-card", "audio-x-generic"]),
-            "cdda" => v.extend(["media-optical-audio", "audio-x-generic"]),
+            "vinyl" => v.extend(["vinyl", "disc-launcher-fallback-vinyl", "audio-x-generic"]),
+            "cdda" => v.extend(["media-optical-audio", "disc-launcher-fallback-audio-cd", "audio-x-generic"]),
             "dcim" | "photo-cd" => v.extend(["camera-photo", "folder-pictures", "image-x-generic"]),
             "dvd-video" | "dvd-vr" | "vcd" | "svcd" => v.extend(["media-optical-dvd-video", "media-optical-dvd", "media-optical-video", "video-x-generic"]),
             "bluray-video" | "bdav" | "avchd" | "hddvd-video" => v.extend(["media-optical-blu-ray", "media-optical-video", "video-x-generic"]),
@@ -1986,11 +1986,12 @@ pub fn offer_icons(o: &Offer, ident: Option<&IdentResult>) -> Vec<String> {
     out
 }
 
-/// Icône unique (notifications) : l'icône propre si installée, sinon la plus générique.
+/// Icône unique (notifications) : une icône de disc-launcher installée
+/// (propre au système, ou de repli), sinon la plus générique.
 fn offer_icon(o: &Offer, ident: Option<&IdentResult>) -> String {
     let v = offer_icons(o, ident);
-    if v.first().is_some_and(|f| f.starts_with("disc-launcher-")) {
-        return v[0].clone();
+    if let Some(own) = v.iter().find(|f| f.starts_with("disc-launcher-") && icon_exists(f)) {
+        return own.clone();
     }
     v.last().cloned().unwrap_or_else(|| "media-optical".into())
 }

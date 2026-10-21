@@ -62,9 +62,13 @@ install: built
 	install -m 644 data/desktop/disc-launcherd-autostart.desktop $(DESTDIR)$(SYSCONFDIR)/xdg/autostart/disc-launcherd.desktop
 	install -d $(DESTDIR)$(DATADIR)/applications $(DESTDIR)$(POLKITACTIONSDIR) $(DESTDIR)$(POLKITRULESDIR)
 	install -m 644 data/desktop/disc-launcher.desktop $(DESTDIR)$(DATADIR)/applications/disc-launcher.desktop
+	install -d $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps
+	install -m 644 data/icons/hicolor/scalable/apps/*.svg $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/
+	-[ -n "$(DESTDIR)" ] || gtk-update-icon-cache -q -t $(DATADIR)/icons/hicolor 2>/dev/null
 	sed 's|@LIBEXECDIR@|$(LIBEXECDIR)|' data/polkit/io.github.flavi1.disclauncher.policy > $(DESTDIR)$(POLKITACTIONSDIR)/io.github.flavi1.disclauncher.policy
 	sed 's|"disc-launcher"|"$(GROUP)"|' data/polkit/50-disc-launcher.rules > $(DESTDIR)$(POLKITRULESDIR)/50-disc-launcher.rules
-	rm -f $(DESTDIR)$(DATADIR)/polkit-1/actions/io.github.flavi1.disclauncher.policy
+	@# Ancien emplacement (versions précédentes, sous PREFIX), s'il diffère.
+	@[ "$(DATADIR)/polkit-1/actions" = "$(POLKITACTIONSDIR)" ] || rm -f $(DESTDIR)$(DATADIR)/polkit-1/actions/io.github.flavi1.disclauncher.policy
 	@# Groupe des utilisateurs autorisés sans mot de passe (pas lors d'un empaquetage).
 	@if [ -z "$(DESTDIR)" ] && ! getent group $(GROUP) >/dev/null; then \
 	  groupadd --system $(GROUP) && echo "Groupe $(GROUP) créé. Pour dumper sans mot de passe : sudo usermod -aG $(GROUP) \$$USER, puis reconnectez-vous."; \
@@ -97,6 +101,8 @@ install-user: build
 	install -m 644 data/signatures/*.toml $(HOME)/.local/share/disc-launcher/signatures/
 	install -m 644 data/drive-profiles.toml $(HOME)/.local/share/disc-launcher/
 	sed 's|^Exec=disc-launcherd|Exec=$(HOME)/.local/bin/disc-launcherd|' data/desktop/disc-launcherd-autostart.desktop > $(HOME)/.config/autostart/disc-launcherd.desktop
+	install -d $(HOME)/.local/share/icons/hicolor/scalable/apps
+	install -m 644 data/icons/hicolor/scalable/apps/*.svg $(HOME)/.local/share/icons/hicolor/scalable/apps/
 
 uninstall:
 	for b in $(BINS); do rm -f $(DESTDIR)$(BINDIR)/$$b; done
@@ -104,6 +110,7 @@ uninstall:
 	rm -rf $(DESTDIR)$(LIBEXECDIR)/disc-launcher $(DESTDIR)$(DATADIR)/disc-launcher $(DESTDIR)$(DATADIR)/doc/disc-launcher
 	rm -f $(DESTDIR)$(SYSCONFDIR)/xdg/autostart/disc-launcherd.desktop
 	rm -f $(DESTDIR)$(DATADIR)/applications/disc-launcher.desktop $(DESTDIR)$(DATADIR)/applications/disc-launcher-play.desktop
+	rm -f $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/disc-launcher-fallback-*.svg
 	rm -f $(DESTDIR)$(DATADIR)/solid/actions/disc-launcher-play.desktop
 	rm -f $(DESTDIR)$(DATADIR)/polkit-1/actions/io.github.flavi1.disclauncher.policy
 	rm -f $(DESTDIR)$(POLKITACTIONSDIR)/io.github.flavi1.disclauncher.policy $(DESTDIR)$(POLKITRULESDIR)/50-disc-launcher.rules

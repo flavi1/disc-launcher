@@ -19,6 +19,27 @@ Dépôt : <https://github.com/flavi1/disc-launcher>. Contrat et exemples des ges
 - **Indépendant du bureau.** Une seule fenêtre, « Disques et périphériques », regroupe tous les disques, cartouches, volumes et tâches ; l'icône de la zone de notification l'affiche ou la masque (voir « Fenêtre et icône »). GTK 3 y est chargé à l'exécution, sans dépendance de compilation. Sans GTK 3 ni affichage, les propositions passent par les notifications freedesktop avec boutons d'action, puis par kdialog, zenity ou yad.
 - **Indépendant des applications.** Les émulateurs et les lecteurs multimédias ne sont que des réglages. Chaque système ou média peut être confié à un exécutable de votre choix (voir « Gestionnaires »).
 
+## Installation par paquet
+
+Chaque version publiée (étiquette `vX.Y.Z`) fournit, sur la page [Releases](https://github.com/flavi1/disc-launcher/releases) :
+
+| Distribution | Fichier | Installation |
+| --- | --- | --- |
+| Debian 12+, Ubuntu 22.04+, Mint… | `disc-launcher_X.Y.Z_amd64.deb` | `sudo apt install ./disc-launcher_X.Y.Z_amd64.deb` |
+| Arch, Manjaro | `disc-launcher-X.Y.Z-1-x86_64.pkg.tar.zst` | `sudo pacman -U disc-launcher-X.Y.Z-1-x86_64.pkg.tar.zst` |
+| Arch (depuis les sources, AUR) | `PKGBUILD`, `disc-launcher.install`, `SRCINFO` | `makepkg -si` dans le dossier |
+
+Les paquets installent tout ce que fait `sudo make install` (préfixe `/usr`), créent le groupe `disc-launcher` et marquent `/etc/disc-launcher/*.toml` comme configuration à conserver. Les outils de dump, Kodi, RetroArch… restent facultatifs (dépendances recommandées ou optionnelles du paquet, voir [docs/dependances.md](docs/dependances.md)). Ensuite : `sudo usermod -aG disc-launcher $USER`, puis reconnectez-vous ; le démon démarre avec la session.
+
+**Pour les mainteneurs.** Le flux GitHub Actions `Paquets` (`.github/workflows/paquets.yml`) construit les deux paquets à chaque pull request (artefacts téléchargeables de l'exécution) et les publie à chaque étiquette :
+
+```sh
+# version de Cargo.toml mise à jour et fusionnée dans main, puis :
+git tag v0.5.0 && git push origin v0.5.0
+```
+
+L'étiquette doit correspondre à la version de `Cargo.toml`. Le `.deb` est construit sur Ubuntu 22.04 (glibc 2.35) par `packaging/debian/build-deb.sh` (sans debhelper : `make install DESTDIR=…` puis `dpkg-deb`) ; le paquet Arch par `makepkg` avec `packaging/arch/PKGBUILD`, dans un conteneur Arch. Pour l'étiquette, le `PKGBUILD` publié porte la somme de contrôle de l'archive de la version, prêt pour l'AUR. Le flux `Tests` (`.github/workflows/ci.yml`) lance les tests unitaires et de bout en bout à chaque pull request.
+
 ## Compilation et installation
 
 Prérequis de compilation : Rust ≥ 1.75 avec cargo (testé avec 1.97), un compilateur C pour l'édition de liens, et le paquet de développement de SQLite.
@@ -57,7 +78,8 @@ L'installation dépose :
 | Démon, commande, classificateur | `$(PREFIX)/bin` : `disc-launcherd`, `disc-launcher`, `disc-identify`, `disc-launcher-job` |
 | Gestionnaires génériques | `disc-launcher-generic` (consoles, cartouches), `disc-launcher-media-generic` (médias), `disc-launcher-data-generic` (disques de fichiers) |
 | Gestionnaires et lecteurs facultatifs | `disc-launcher-retroarch`, `disc-launcher-player-kodi`, `disc-launcher-resolve-serials` |
-| Assistant privilégié | `$(PREFIX)/libexec/disc-launcher/disc-launcher-helper` ; politique et règle polkit (`/usr/share/polkit-1/actions/`, `/etc/polkit-1/rules.d/`) ; groupe `disc-launcher` |
+| Assistant privilégié | `$(PREFIX)/libexec/disc-launcher/disc-launcher-helper` ; politique et règle polkit (`/usr/share/polkit-1/actions/`, `/etc/polkit-1/rules.d/`, ou `/usr/share/polkit-1/rules.d/` pour les paquets) ; groupe `disc-launcher` |
+| Icônes de repli (CD audio, cartouche, vinyle) | `$(PREFIX)/share/icons/hicolor/scalable/apps/disc-launcher-fallback-*.svg` |
 | Manifestes, signatures, profils de lecteurs | `$(PREFIX)/share/disc-launcher/` |
 | Configuration | `/etc/disc-launcher/config.toml` et `helper-tools.toml` |
 | Démarrage du démon | `/etc/xdg/autostart/disc-launcherd.desktop` (voir « Démarrage du démon ») |
@@ -213,7 +235,7 @@ La fenêtre **« Disques et périphériques »** (`disc-launcher-panel`) liste, 
 - les **cartouches** de la Retrode et les **volumes USB** (barre d'espace libre) ;
 - les **tâches** en cours (dump, vérification, conversion), avec leur progression et « Annuler ».
 
-Sa hauteur suit son contenu, sans défilement tant qu'elle ne dépasse pas 90 % de la hauteur de l'écran. Elle s'ouvre à l'insertion d'un disque, d'une cartouche ou d'un volume, et se ferme dès qu'une action est choisie. Exception : sur un lecteur à plateau motorisé (détecté par le noyau), « Éjecter » ou « Ouvrir le plateau » la laissent ouverte, le temps de poser le disque et de cliquer sur « Fermer le plateau ». Chaque élément a son icône (cartouche selon la console, CD audio, photos, DVD et Blu-ray vidéo, carte mémoire, clé USB…), prise dans le thème d'icônes du bureau. L'**icône de la zone de notification** (icône d'éjection) l'affiche ou la masque, d'un clic gauche ou droit. Exemple : « Lire avec Kodi », puis on quitte Kodi et un clic sur l'icône rouvre la fenêtre. Une éjection faite hors de disc-launcher (bouton du lecteur) est prise en compte en deux secondes au plus. Les fins de tâche restent signalées par une notification.
+Sa hauteur suit son contenu, sans défilement tant qu'elle ne dépasse pas 90 % de la hauteur de l'écran. Elle s'ouvre à l'insertion d'un disque, d'une cartouche ou d'un volume, et se ferme dès qu'une action est choisie. Exception : sur un lecteur à plateau motorisé (détecté par le noyau), « Éjecter » ou « Ouvrir le plateau » la laissent ouverte, le temps de poser le disque et de cliquer sur « Fermer le plateau ». Chaque élément a son icône (cartouche selon la console, CD audio, photos, DVD et Blu-ray vidéo, carte mémoire, clé USB…), prise dans le thème d'icônes du bureau ; à défaut, disc-launcher fournit les siennes pour les CD audio (disque et note de musique), les cartouches et les vinyles (dessins originaux, même licence que le projet). L'**icône de la zone de notification** (icône d'éjection) l'affiche ou la masque, d'un clic gauche ou droit. Exemple : « Lire avec Kodi », puis on quitte Kodi et un clic sur l'icône rouvre la fenêtre. Une éjection faite hors de disc-launcher (bouton du lecteur) est prise en compte en deux secondes au plus. Les fins de tâche restent signalées par une notification.
 
 La fenêtre utilise GTK 3, chargé à l'exécution : présent sur presque tous les bureaux (sous Plasma, le thème Breeze GTK lui donne l'apparence de KDE). Sans GTK 3 ou sans affichage, les propositions passent par les notifications, puis par kdialog, zenity ou yad ; `[ui] panel = "notifications"` force ce mode.
 
@@ -461,6 +483,9 @@ src/tray.rs panel.rs        icône StatusNotifierItem ; pilotage de la fenêtre
 src/bin/disc-launcher-panel.rs   fenêtre « Disques et périphériques » (GTK 3 chargé à l'exécution)
 src/usb.rs filemanager.rs   volumes USB ; ouverture dans le gestionnaire de fichiers
 src/vinyl.rs                platine vinyle (vinylrip)
+data/icons/                 icônes de repli (SVG)
+packaging/                  paquets Debian (build-deb.sh) et Arch (PKGBUILD)
+.github/workflows/          tests (ci.yml) ; paquets et publication (paquets.yml)
 src/device/                 lecteur réel (SG_IO), images .iso/.cue, source mémoire
 src/fs/                     ISO 9660, UDF (jusqu'à 2.60, Blu-ray), XDVDFS, dossier monté
 src/identify/               classificateur : TOC, signatures déclaratives, sondes, profils
@@ -490,7 +515,7 @@ Le projet n'a aujourd'hui aucune dépendance Rust : crates.io n'était pas acces
 - **Validation sur matériel** : passer `disc-identify` sur de vrais disques de chaque famille, conserver les résultats comme jeux de tests, corriger les lignes de commande des outils et des émulateurs.
 - **Disques Nintendo et OmniDrive** : vérifier si une lecture standard fonctionne avec le firmware OmniDrive ; sinon, implémenter la lecture brute de l'en-tête pour identifier le jeu avant le dump.
 - **Tests de robustesse automatisés (fuzzing)** des lecteurs ISO 9660, XDVDFS, PARAM.SFO et cue, qui analysent des données venues du disque.
-- **Intégration continue et paquets** : tests de bout en bout dans GitHub Actions, paquets AUR et Debian.
+- **Publication AUR** : déposer à chaque version le `PKGBUILD` et le `SRCINFO` publiés avec la version.
 - **Résolveurs en ligne** facultatifs (GameTDB, bases de séries), désactivés par défaut.
 
 ## Licence

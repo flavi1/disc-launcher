@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+    # Membres de ce groupe : dumps sans mot de passe (règle polkit).
+    getent group disc-launcher >/dev/null || addgroup --system disc-launcher >/dev/null
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -q -t /usr/share/icons/hicolor || true
+    fi
+    echo "disc-launcher : pour dumper sans mot de passe, sudo usermod -aG disc-launcher \$USER, puis reconnectez-vous."
+    echo "disc-launcher : le démon démarre à la prochaine ouverture de session (ou : disc-launcherd &)."
+fi
+exit 0

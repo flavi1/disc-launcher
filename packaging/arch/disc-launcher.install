@@ -1,0 +1,14 @@
+post_install() {
+  # Membres de ce groupe : dumps sans mot de passe (règle polkit).
+  getent group disc-launcher >/dev/null || groupadd --system disc-launcher
+  echo "disc-launcher : pour dumper sans mot de passe, sudo usermod -aG disc-launcher \$USER, puis reconnectez-vous."
+  echo "disc-launcher : le démon démarre à la prochaine ouverture de session (ou : disc-launcherd &)."
+}
+
+post_upgrade() {
+  getent group disc-launcher >/dev/null || groupadd --system disc-launcher
+}
+
+post_remove() {
+  echo "disc-launcher : groupe disc-launcher conservé (sudo groupdel disc-launcher pour le supprimer)."
+}
