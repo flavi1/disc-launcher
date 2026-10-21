@@ -20,18 +20,32 @@ pub struct Volume {
     pub mount: Option<PathBuf>,
     /// Carte mémoire (lecteur SD intégré ou USB) plutôt que clé ou disque.
     pub sd: bool,
+    /// Disque entier (`/dev/sdb`) ; vide pour un volume simulé.
+    pub disk: String,
+    /// Nombre de volumes listés sur ce disque (plusieurs partitions montables).
+    pub parts: usize,
 }
 
 impl Volume {
-    /// Nom affiché : étiquette, sinon modèle, sinon périphérique.
+    /// Nom affiché : étiquette, sinon modèle, sinon périphérique. Sans
+    /// étiquette, une partition parmi d'autres est désignée par son nom
+    /// (« SanDisk Ultra (sdb2) »).
     pub fn name(&self) -> String {
+        let short = self.dev.trim_start_matches("/dev/");
         if !self.label.is_empty() {
             self.label.clone()
+        } else if !self.model.is_empty() && self.parts > 1 {
+            format!("{} ({short})", self.model)
         } else if !self.model.is_empty() {
             self.model.clone()
         } else {
-            self.dev.trim_start_matches("/dev/").to_string()
+            short.to_string()
         }
+    }
+
+    /// Nom court du disque entier (`sdb`).
+    pub fn disk_name(&self) -> &str {
+        self.disk.trim_start_matches("/dev/")
     }
 }
 
@@ -76,7 +90,7 @@ pub fn list() -> Vec<Volume> {
         for item in extra.split(':').filter(|s| !s.is_empty()) {
             let (label, dir) = item.split_once('=').unwrap_or(("USB", item));
             if Path::new(dir).is_dir() {
-                v.push(Volume { dev: format!("usb:{dir}"), label: label.into(), fstype: "vfat".into(), size: 0, model: String::new(), mount: Some(PathBuf::from(dir)), sd: false });
+                v.push(Volume { dev: format!("usb:{dir}"), label: label.into(), fstype: "vfat".into(), size: 0, model: String::new(), mount: Some(PathBuf::from(dir)), sd: false, disk: String::new(), parts: 1 });
             }
         }
     }
@@ -115,6 +129,7 @@ pub fn list_in(sys_block: &Path, udev: &Path, use_udisks: bool) -> Vec<Volume> {
         let nodes: Vec<(String, PathBuf)> = if parts.is_empty() { vec![(disk.clone(), d.clone())] } else { parts.iter().map(|p| (p.clone(), d.join(p))).collect() };
         // Carte mémoire : lecteur intégré, ou lecteur de cartes USB (udev, modèle).
         let disk_udev = std::fs::read_to_string(udev.join(format!("b{}", read(&d.join("dev"))))).unwrap_or_default();
+        let first = out.len();
         let lower_model = model.to_ascii_lowercase();
         let sd = mmc_sd
             || disk_udev.lines().any(|l| l.starts_with("E:ID_DRIVE_FLASH_SD=1") || l.starts_with("E:ID_DRIVE_MEDIA_FLASH_SD=1") || l.starts_with("E:ID_DRIVE_FLASH_MS=1") || l.starts_with("E:ID_DRIVE_FLASH_CF=1"))
@@ -131,6 +146,12 @@ pub fn list_in(sys_block: &Path, udev: &Path, use_udisks: bool) -> Vec<Volume> {
                 // Partition étendue, espace non formaté…
                 continue;
             }
+            // Non montable ou masqué par le système (comme dans les gestionnaires de fichiers) :
+            // échange, LVM, RAID, chiffré (LUKS : le volume déverrouillé est ailleurs),
+            // partition système EFI d'une clé d'installation, UDISKS_IGNORE.
+            if mount.is_none() && hidden(&fstype, &udev_text(udev, &sys)) {
+                continue;
+            }
             if fstype.is_empty() {
                 fstype = "?".into();
             }
@@ -139,10 +160,50 @@ pub fn list_in(sys_block: &Path, udev: &Path, use_udisks: bool) -> Vec<Volume> {
             }
             label = label.trim().to_string();
             let size = read(&sys.join("size")).parse::<u64>().unwrap_or(0) * 512;
-            out.push(Volume { dev, label, fstype, size, model: model.clone(), mount, sd });
+            out.push(Volume { dev, label, fstype, size, model: model.clone(), mount, sd, disk: format!("/dev/{disk}"), parts: 0 });
+        }
+        let n = out.len() - first;
+        for v in &mut out[first..] {
+            v.parts = n;
         }
     }
     out
+}
+
+fn udev_text(udev: &Path, sys: &Path) -> String {
+    std::fs::read_to_string(udev.join(format!("b{}", read(&sys.join("dev"))))).unwrap_or_default()
+}
+
+/// Partition à ne pas proposer (tant qu'elle n'est pas montée).
+pub fn hidden(fstype: &str, udev: &str) -> bool {
+    const NOT_MOUNTABLE: &[&str] = &["swap", "LVM2_member", "linux_raid_member", "zfs_member", "crypto_LUKS", "BitLocker", "bcache", "ceph"];
+    const ESP: &str = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b";
+    let prop = |k: &str| udev.lines().find_map(|l| l.strip_prefix("E:").and_then(|x| x.strip_prefix(k)).and_then(|x| x.strip_prefix('='))).unwrap_or("");
+    NOT_MOUNTABLE.contains(&fstype)
+        || prop("UDISKS_IGNORE") == "1"
+        || prop("ID_PART_ENTRY_TYPE").eq_ignore_ascii_case(ESP)
+        || prop("ID_PART_ENTRY_TYPE").eq_ignore_ascii_case("0xef")
+}
+
+/// Disque entier et ses partitions (`/dev/sdb`, `/dev/sdb1`…), d'après sysfs.
+pub fn disk_nodes(sys_block: &Path, disk: &str) -> Vec<String> {
+    let name = disk.trim_start_matches("/dev/");
+    let d = sys_block.join(name);
+    let mut v: Vec<String> = std::fs::read_dir(&d)
+        .map(|it| it.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with(name) && d.join(n).join("partition").exists()).map(|n| format!("/dev/{n}")).collect())
+        .unwrap_or_default();
+    v.sort();
+    v.insert(0, format!("/dev/{name}"));
+    v
+}
+
+/// Partitions du disque encore montées : (périphérique, point de montage).
+pub fn mounted_on_disk(disk: &str) -> Vec<(String, PathBuf)> {
+    if disk.is_empty() {
+        return vec![];
+    }
+    let root = std::env::var("DISC_LAUNCHER_SYSFS_BLOCK").unwrap_or_else(|_| "/sys/block".into());
+    disk_nodes(Path::new(&root), disk).into_iter().filter_map(|d| crate::device::find_mount_point(&d).map(|m| (d, m))).collect()
 }
 
 /// Taille lisible : « 15,6 Go ».
@@ -206,7 +267,21 @@ mod tests {
         // Lecteur de cartes USB (udev) : carte mémoire.
         mk(&sb.join("sde"), &[("removable", "1"), ("size", "1000"), ("dev", "8:64"), ("device/vendor", "Generic"), ("device/model", "STORAGE DEVICE")]);
         std::fs::write(udev.join("b8:64"), "E:ID_DRIVE_FLASH_SD=1\nE:ID_FS_TYPE=vfat\nE:ID_FS_LABEL=APN\n").unwrap();
+        // Clé à plusieurs partitions : deux volumes, partition EFI et échange masquées.
+        mk(&sb.join("sdf"), &[("removable", "1"), ("size", "4000"), ("dev", "8:80"), ("device/vendor", "Kingston"), ("device/model", "DT")]);
+        for (i, (fs, extra)) in [("vfat", "E:ID_PART_ENTRY_TYPE=c12a7328-f81f-11d2-ba4b-00a0c93ec93b\n"), ("ext4", ""), ("ntfs", "E:ID_FS_LABEL=DONNEES\n"), ("swap", "")].iter().enumerate() {
+            let n = i + 1;
+            mk(&sb.join(format!("sdf/sdf{n}")), &[("partition", "1"), ("size", "1000"), ("dev", &format!("8:{}", 80 + n))]);
+            std::fs::write(udev.join(format!("b8:{}", 80 + n)), format!("E:ID_FS_TYPE={fs}\n{extra}")).unwrap();
+        }
         let mut v = list_in(&sb, &udev, false);
+        let multi: Vec<Volume> = v.iter().filter(|x| x.disk == "/dev/sdf").cloned().collect();
+        v.retain(|x| x.disk != "/dev/sdf");
+        assert_eq!(multi.iter().map(|x| x.dev.as_str()).collect::<Vec<_>>(), ["/dev/sdf2", "/dev/sdf3"]);
+        assert!(multi.iter().all(|x| x.parts == 2));
+        assert_eq!(multi[0].name(), "Kingston DT (sdf2)");
+        assert_eq!(multi[1].name(), "DONNEES");
+        assert_eq!(disk_nodes(&sb, "/dev/sdf"), ["/dev/sdf", "/dev/sdf1", "/dev/sdf2", "/dev/sdf3", "/dev/sdf4"]);
         assert_eq!(v.len(), 3, "{v:?}");
         let sde = v.pop().unwrap();
         assert!(sde.dev == "/dev/sde" && sde.sd && sde.label == "APN", "{sde:?}");
@@ -217,6 +292,7 @@ mod tests {
         assert_eq!(v[0].label, "MA CLE");
         assert_eq!(v[0].fstype, "vfat");
         assert_eq!(v[0].model, "SanDisk Ultra");
+        assert_eq!((v[0].disk.as_str(), v[0].parts, v[0].name()), ("/dev/sdb", 1, "MA CLE".to_string()));
         assert_eq!(human_size(v[0].size), "15,5 Go");
         let _ = std::fs::remove_dir_all(&base);
     }
