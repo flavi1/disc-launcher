@@ -1,0 +1,21 @@
+Package: disc-launcher
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: flavi1 <flavien.guillon@gmail.com>
+Installed-Size: @SIZE@
+Depends: libc6 (>= 2.35), libgcc-s1, libsqlite3-0, dbus, pkexec | policykit-1
+Recommends: udisks2, libgtk-3-0, librsvg2-common, xdg-utils, mame-tools
+Suggests: kodi, retroarch, cdrdao, dolphin-emu
+Section: games
+Priority: optional
+Homepage: https://github.com/flavi1/disc-launcher
+Description: lanceur de disques, cartouches et périphériques
+ Détecte les disques optiques (jeux de console, CD audio, DVD, Blu-ray,
+ disques de données), les cartouches d'une Retrode, les volumes USB et les
+ platines vinyle (vinylrip), puis propose de les lire, de lancer le jeu ou
+ de le dumper dans ~/ROMs avec les noms Redump / No-Intro et la disposition
+ d'ES-DE. Fenêtre unique « Disques et périphériques » et icône de la zone de
+ notification.
+ .
+ Les outils de dump (redumper, chdman…) sont facultatifs : voir
+ /usr/share/doc/disc-launcher/docs/dependances.md.

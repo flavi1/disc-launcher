@@ -1,0 +1,53 @@
+# Maintainer: flavi1 <flavien.guillon@gmail.com>
+# Paquet Arch Linux de disc-launcher (également utilisable pour l'AUR).
+# Construction : makepkg -si (dans ce dossier).
+pkgname=disc-launcher
+pkgver=0.5.0
+pkgrel=1
+pkgdesc="Lanceur de disques, cartouches et périphériques : jeux (dump Redump vers ~/ROMs façon ES-DE), médias, Retrode, USB, vinyle"
+arch=('x86_64' 'aarch64')
+url="https://github.com/flavi1/disc-launcher"
+license=('GPL-3.0-or-later')
+depends=('glibc' 'gcc-libs' 'sqlite' 'polkit' 'dbus')
+makedepends=('cargo')
+optdepends=(
+  'gtk3: fenêtre « Disques et périphériques » (sinon notifications)'
+  'librsvg: icônes SVG de la fenêtre'
+  'udisks2: montage des Blu-ray, volumes USB, ouverture des fichiers'
+  'xdg-utils: ouverture dans le gestionnaire de fichiers'
+  'mame-tools: chdman (CHD)'
+  'redumper: dump des disques (AUR redumper-bin)'
+  'dolphin-emu-tool: dump GameCube / Wii'
+  'cdrdao: repli pour les CD sans redumper'
+  'kodi: lecture des médias'
+  'retroarch: émulateur par défaut'
+)
+backup=('etc/disc-launcher/config.toml' 'etc/disc-launcher/helper-tools.toml')
+install=disc-launcher.install
+source=("$pkgname-$pkgver.tar.gz::https://github.com/flavi1/disc-launcher/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo test --frozen --release --lib
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  make install DESTDIR="$pkgdir" PREFIX=/usr LIBEXECDIR=/usr/lib SYSCONFDIR=/etc \
+    POLKITRULESDIR=/usr/share/polkit-1/rules.d
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

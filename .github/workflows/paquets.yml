@@ -1,0 +1,118 @@
+# Paquets Debian/Ubuntu (.deb) et Arch Linux (.pkg.tar.zst).
+# - Pull request ou lancement manuel : paquets construits, téléchargeables
+#   dans les artefacts de l'exécution.
+# - Étiquette vX.Y.Z : paquets publiés dans la version GitHub correspondante,
+#   avec le PKGBUILD (somme de contrôle renseignée) et le .SRCINFO pour l'AUR.
+name: Paquets
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::L'étiquette ${GITHUB_REF_NAME} ne correspond pas à la version de Cargo.toml ($version)"
+            exit 1
+          fi
+
+  deb:
+    needs: version
+    # Ubuntu 22.04 (glibc 2.35) : le paquet s'installe aussi sur Debian 12 et les Ubuntu suivantes.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dépendances
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsqlite3-dev
+          rustup toolchain install stable --profile minimal
+      - name: Compilation
+        run: cargo +stable build --release --locked
+      - name: Paquet
+        run: packaging/debian/build-deb.sh dist
+      - name: Contrôle du paquet
+        run: |
+          dpkg-deb -I dist/*.deb
+          dpkg-deb -c dist/*.deb | grep -q usr/libexec/disc-launcher/disc-launcher-helper
+          dpkg-deb -c dist/*.deb | grep -q usr/share/polkit-1/actions/io.github.flavi1.disclauncher.policy
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paquet-debian
+          path: dist/*.deb
+
+  arch:
+    needs: version
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Dépendances
+        run: pacman -Syu --noconfirm --needed git rust sqlite polkit dbus
+      - uses: actions/checkout@v4
+      - name: Paquet
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          useradd -m builder
+          work=/home/builder/pkg
+          mkdir -p "$work"
+          cp packaging/arch/PKGBUILD packaging/arch/disc-launcher.install "$work/"
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" "$work/PKGBUILD"
+          # Source locale (même nom que l'archive de l'étiquette) : makepkg ne télécharge rien.
+          git archive --prefix="disc-launcher-$VERSION/" -o "$work/disc-launcher-$VERSION.tar.gz" HEAD
+          chown -R builder "$work"
+          su builder -c "cd $work && makepkg -f --noconfirm"
+          mkdir -p dist
+          cp "$work"/*.pkg.tar.zst dist/
+      - name: PKGBUILD pour l'AUR (étiquette)
+        if: github.ref_type == 'tag'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          work=/home/builder/aur
+          mkdir -p "$work"
+          cp packaging/arch/PKGBUILD packaging/arch/disc-launcher.install "$work/"
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" "$work/PKGBUILD"
+          sum=$(curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/v$VERSION.tar.gz" | sha256sum | cut -d' ' -f1)
+          sed -i "s/^sha256sums=.*/sha256sums=('$sum')/" "$work/PKGBUILD"
+          chown -R builder "$work"
+          su builder -c "cd $work && makepkg --printsrcinfo > .SRCINFO"
+          cp "$work/PKGBUILD" dist/PKGBUILD
+          cp "$work/.SRCINFO" dist/SRCINFO
+          cp "$work/disc-launcher.install" dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paquet-arch
+          path: dist/*
+
+  publication:
+    if: github.ref_type == 'tag'
+    needs: [deb, arch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Version GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes \
+            || gh release upload "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --clobber
