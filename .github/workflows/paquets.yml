@@ -1,12 +1,20 @@
 # Paquets Debian/Ubuntu (.deb) et Arch Linux (.pkg.tar.zst).
-# - Pull request ou lancement manuel : paquets construits, téléchargeables
-#   dans les artefacts de l'exécution.
-# - Étiquette vX.Y.Z : paquets publiés dans la version GitHub correspondante,
-#   avec le PKGBUILD (somme de contrôle renseignée) et le .SRCINFO pour l'AUR.
+#
+# - Push sur main : version de développement publiée automatiquement dans la
+#   pré-version GitHub « dev » (remplacée à chaque push). Numéro croissant
+#   pour qu'apt et pacman voient chaque construction comme une mise à jour :
+#   Debian 0.5.0+git20261021124800.g068b63e, Arch 0.5.0.20261021124800.
+#   Liens fixes :
+#     …/releases/download/dev/disc-launcher_dev_amd64.deb
+#     …/releases/download/dev/disc-launcher-dev-x86_64.pkg.tar.zst
+# - Étiquette vX.Y.Z : version stable publiée sous ce nom, avec le PKGBUILD
+#   (somme de contrôle renseignée) et le .SRCINFO pour l'AUR.
+# - Pull request ou lancement manuel : paquets construits, dans les artefacts.
 name: Paquets
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -14,20 +22,36 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: paquets-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   version:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.v.outputs.version }}
+      base: ${{ steps.v.outputs.base }}
+      deb: ${{ steps.v.outputs.deb }}
+      arch: ${{ steps.v.outputs.arch }}
     steps:
       - uses: actions/checkout@v4
       - id: v
         run: |
-          version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
-            echo "::error::L'étiquette ${GITHUB_REF_NAME} ne correspond pas à la version de Cargo.toml ($version)"
-            exit 1
+          base=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            if [ "${GITHUB_REF_NAME}" != "v$base" ]; then
+              echo "::error::L'étiquette ${GITHUB_REF_NAME} ne correspond pas à la version de Cargo.toml ($base)"
+              exit 1
+            fi
+            echo "deb=$base" >> "$GITHUB_OUTPUT"
+            echo "arch=$base" >> "$GITHUB_OUTPUT"
+          else
+            # Horodatage du commit (UTC) : croissant d'une construction à l'autre.
+            stamp=$(TZ=UTC git log -1 --date=format-local:%Y%m%d%H%M%S --format=%cd)
+            short=$(git rev-parse --short=7 HEAD)
+            echo "deb=$base+git$stamp.g$short" >> "$GITHUB_OUTPUT"
+            echo "arch=$base.$stamp" >> "$GITHUB_OUTPUT"
           fi
 
   deb:
@@ -44,6 +68,8 @@ jobs:
       - name: Compilation
         run: cargo +stable build --release --locked
       - name: Paquet
+        env:
+          VERSION: ${{ needs.version.outputs.deb }}
         run: packaging/debian/build-deb.sh dist
       - name: Contrôle du paquet
         run: |
@@ -65,16 +91,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Paquet
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          BASE: ${{ needs.version.outputs.base }}
+          PKGVER: ${{ needs.version.outputs.arch }}
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          useradd -m builder
+          id builder >/dev/null 2>&1 || useradd -m builder
           work=/home/builder/pkg
           mkdir -p "$work"
           cp packaging/arch/PKGBUILD packaging/arch/disc-launcher.install "$work/"
-          sed -i "s/^pkgver=.*/pkgver=$VERSION/" "$work/PKGBUILD"
-          # Source locale (même nom que l'archive de l'étiquette) : makepkg ne télécharge rien.
-          git archive --prefix="disc-launcher-$VERSION/" -o "$work/disc-launcher-$VERSION.tar.gz" HEAD
+          sed -i "s/^pkgver=.*/pkgver=$PKGVER/" "$work/PKGBUILD"
+          # Source locale (même nom que l'archive attendue) : makepkg ne télécharge rien.
+          git archive --prefix="disc-launcher-$PKGVER/" -o "$work/disc-launcher-$PKGVER.tar.gz" HEAD
           chown -R builder "$work"
           su builder -c "cd $work && makepkg -f --noconfirm"
           mkdir -p dist
@@ -82,13 +109,13 @@ jobs:
       - name: PKGBUILD pour l'AUR (étiquette)
         if: github.ref_type == 'tag'
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          BASE: ${{ needs.version.outputs.base }}
         run: |
           work=/home/builder/aur
           mkdir -p "$work"
           cp packaging/arch/PKGBUILD packaging/arch/disc-launcher.install "$work/"
-          sed -i "s/^pkgver=.*/pkgver=$VERSION/" "$work/PKGBUILD"
-          sum=$(curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/v$VERSION.tar.gz" | sha256sum | cut -d' ' -f1)
+          sed -i "s/^pkgver=.*/pkgver=$BASE/" "$work/PKGBUILD"
+          sum=$(curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/v$BASE.tar.gz" | sha256sum | cut -d' ' -f1)
           sed -i "s/^sha256sums=.*/sha256sums=('$sum')/" "$work/PKGBUILD"
           chown -R builder "$work"
           su builder -c "cd $work && makepkg --printsrcinfo > .SRCINFO"
@@ -100,6 +127,7 @@ jobs:
           name: paquet-arch
           path: dist/*
 
+  # Étiquette vX.Y.Z : version stable.
   publication:
     if: github.ref_type == 'tag'
     needs: [deb, arch]
@@ -116,3 +144,38 @@ jobs:
           ls -la dist
           gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes \
             || gh release upload "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --clobber
+
+  # Push sur main : pré-version « dev », remplacée à chaque fois.
+  developpement:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [version, deb, arch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Pré-version « dev »
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEB: ${{ needs.version.outputs.deb }}
+          ARCH: ${{ needs.version.outputs.arch }}
+        run: |
+          set -e
+          # Noms fixes en plus des noms complets : liens de téléchargement stables.
+          cp dist/*.deb dist/disc-launcher_dev_amd64.deb
+          cp "$(ls dist/*.pkg.tar.zst | head -n 1)" dist/disc-launcher-dev-x86_64.pkg.tar.zst
+          ls -la dist
+          # L'étiquette « dev » suit le dernier commit de main (pas de nouveau
+          # déclenchement : un push fait avec le jeton du workflow n'en déclenche pas).
+          git tag -f dev
+          git push -f origin refs/tags/dev
+          notes="Construction automatique du dernier commit de main ($(git rev-parse --short HEAD)) : $DEB (Debian/Ubuntu), $ARCH (Arch). Remplacée à chaque push. Pour une version stable, voir les versions vX.Y.Z."
+          if gh release view dev >/dev/null 2>&1; then
+            gh release view dev --json assets --jq '.assets[].name' | while read -r a; do gh release delete-asset dev "$a" -y; done
+            gh release edit dev --title "Développement ($DEB)" --notes "$notes" --prerelease
+          else
+            gh release create dev --title "Développement ($DEB)" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+          fi
+          gh release upload dev dist/*.deb dist/*.pkg.tar.zst --clobber

@@ -6,7 +6,8 @@
 set -eu
 cd "$(dirname "$0")/../.."
 out=${1:-dist}
-version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
+# VERSION : version imposée (ex. construction de développement 0.5.0+git…).
+version=${VERSION:-$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)}
 arch=$(dpkg --print-architecture)
 root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT

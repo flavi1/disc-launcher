@@ -21,24 +21,31 @@ Dépôt : <https://github.com/flavi1/disc-launcher>. Contrat et exemples des ges
 
 ## Installation par paquet
 
-Chaque version publiée (étiquette `vX.Y.Z`) fournit, sur la page [Releases](https://github.com/flavi1/disc-launcher/releases) :
-
-| Distribution | Fichier | Installation |
-| --- | --- | --- |
-| Debian 12+, Ubuntu 22.04+, Mint… | `disc-launcher_X.Y.Z_amd64.deb` | `sudo apt install ./disc-launcher_X.Y.Z_amd64.deb` |
-| Arch, Manjaro | `disc-launcher-X.Y.Z-1-x86_64.pkg.tar.zst` | `sudo pacman -U disc-launcher-X.Y.Z-1-x86_64.pkg.tar.zst` |
-| Arch (depuis les sources, AUR) | `PKGBUILD`, `disc-launcher.install`, `SRCINFO` | `makepkg -si` dans le dossier |
-
-Les paquets installent tout ce que fait `sudo make install` (préfixe `/usr`), créent le groupe `disc-launcher` et marquent `/etc/disc-launcher/*.toml` comme configuration à conserver. Les outils de dump, Kodi, RetroArch… restent facultatifs (dépendances recommandées ou optionnelles du paquet, voir [docs/dependances.md](docs/dependances.md)). Ensuite : `sudo usermod -aG disc-launcher $USER`, puis reconnectez-vous ; le démon démarre avec la session.
-
-**Pour les mainteneurs.** Le flux GitHub Actions `Paquets` (`.github/workflows/paquets.yml`) construit les deux paquets à chaque pull request (artefacts téléchargeables de l'exécution) et les publie à chaque étiquette :
+**Version de développement** (dernier état de `main`, reconstruite automatiquement à chaque push) : pré-version [dev](https://github.com/flavi1/disc-launcher/releases/tag/dev), avec des liens fixes.
 
 ```sh
-# version de Cargo.toml mise à jour et fusionnée dans main, puis :
-git tag v0.5.0 && git push origin v0.5.0
+# Debian 12+, Ubuntu 22.04+, Mint, Kubuntu…
+wget https://github.com/flavi1/disc-launcher/releases/download/dev/disc-launcher_dev_amd64.deb
+sudo apt install ./disc-launcher_dev_amd64.deb
+
+# Arch, Manjaro
+wget https://github.com/flavi1/disc-launcher/releases/download/dev/disc-launcher-dev-x86_64.pkg.tar.zst
+sudo pacman -U disc-launcher-dev-x86_64.pkg.tar.zst
 ```
 
-L'étiquette doit correspondre à la version de `Cargo.toml`. Le `.deb` est construit sur Ubuntu 22.04 (glibc 2.35) par `packaging/debian/build-deb.sh` (sans debhelper : `make install DESTDIR=…` puis `dpkg-deb`) ; le paquet Arch par `makepkg` avec `packaging/arch/PKGBUILD`, dans un conteneur Arch. Pour l'étiquette, le `PKGBUILD` publié porte la somme de contrôle de l'archive de la version, prêt pour l'AUR. Le flux `Tests` (`.github/workflows/ci.yml`) lance les tests unitaires et de bout en bout à chaque pull request.
+Pour mettre à jour, refaites les mêmes commandes : chaque construction porte un numéro croissant (Debian `0.5.0+git<date><heure>.g<commit>`, Arch `0.5.0.<date><heure>`), qu'`apt` et `pacman` voient comme une mise à jour. Utilisez `apt install ./…deb` plutôt que `dpkg -i` : apt installe aussi les dépendances.
+
+**Versions stables** : chaque étiquette `vX.Y.Z` publie sur la page [Releases](https://github.com/flavi1/disc-launcher/releases) `disc-launcher_X.Y.Z_amd64.deb`, `disc-launcher-X.Y.Z-1-x86_64.pkg.tar.zst`, ainsi que `PKGBUILD`, `disc-launcher.install` et `SRCINFO` pour une construction depuis les sources (`makepkg -si`) ou l'AUR.
+
+Les paquets installent tout ce que fait `sudo make install` (préfixe `/usr`), créent le groupe `disc-launcher` et marquent `/etc/disc-launcher/*.toml` comme configuration à conserver ; la configuration personnelle (`~/.config/disc-launcher/`) n'est jamais touchée. Les outils de dump, Kodi, RetroArch… restent facultatifs (dépendances recommandées ou optionnelles, voir [docs/dependances.md](docs/dependances.md)). Ensuite : `sudo usermod -aG disc-launcher $USER`, puis reconnectez-vous ; le démon démarre avec la session. Si disc-launcher avait été installé par `sudo make install`, retirez-le d'abord (`sudo make uninstall` dans le dossier source : la configuration est conservée), sinon les exécutables de `/usr/local/bin` resteraient prioritaires.
+
+**Pour les mainteneurs.** Le flux GitHub Actions `Paquets` (`.github/workflows/paquets.yml`) :
+
+- à chaque push sur `main` : construit les deux paquets et remplace la pré-version `dev` ;
+- à chaque étiquette `vX.Y.Z` (égale à la version de `Cargo.toml`) : publie la version stable, avec le `PKGBUILD` pour l'AUR (somme de contrôle de l'archive renseignée). Depuis github.com : *Releases › Draft a new release › Choose a tag › « v0.6.0 » › Create new tag on publish*, cible `main` ;
+- à chaque pull request : construit les paquets, téléchargeables dans les artefacts de l'exécution.
+
+Le `.deb` est construit sur Ubuntu 22.04 (glibc 2.35) par `packaging/debian/build-deb.sh` (`make install DESTDIR=…` puis `dpkg-deb`, sans debhelper) ; le paquet Arch par `makepkg` avec `packaging/arch/PKGBUILD`, dans un conteneur Arch. Le flux `Tests` (`.github/workflows/ci.yml`) lance les tests unitaires et de bout en bout à chaque push et pull request.
 
 ## Compilation et installation
 
