@@ -1,4 +1,5 @@
-# Paquets Debian/Ubuntu (.deb) et Arch Linux (.pkg.tar.zst).
+# Paquets Debian/Ubuntu (.deb) et Arch Linux (.pkg.tar.zst), et l'extension
+# Kodi service.disc-launcher (.zip, construite depuis flavi1/kodi-disc-launcher).
 #
 # - Push sur main : version de développement publiée automatiquement dans la
 #   pré-version GitHub « dev » (remplacée à chaque push). Numéro croissant
@@ -7,6 +8,7 @@
 #   Liens fixes :
 #     …/releases/download/dev/disc-launcher_dev_amd64.deb
 #     …/releases/download/dev/disc-launcher-dev-x86_64.pkg.tar.zst
+#     …/releases/download/dev/service.disc-launcher_dev.zip
 # - Étiquette vX.Y.Z : version stable publiée sous ce nom, avec le PKGBUILD
 #   (somme de contrôle renseignée) et le .SRCINFO pour l'AUR.
 # - Pull request ou lancement manuel : paquets construits, dans les artefacts.
@@ -127,10 +129,22 @@ jobs:
           name: paquet-arch
           path: dist/*
 
+  # Extension Kodi : branche main de son dépôt (KODI_ADDON_REF pour une autre).
+  kodi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive de l'extension
+        run: packaging/kodi/build-zip.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-kodi
+          path: dist/*.zip
+
   # Étiquette vX.Y.Z : version stable.
   publication:
     if: github.ref_type == 'tag'
-    needs: [deb, arch]
+    needs: [deb, arch, kodi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -148,7 +162,7 @@ jobs:
   # Push sur main : pré-version « dev », remplacée à chaque fois.
   developpement:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [version, deb, arch]
+    needs: [version, deb, arch, kodi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -166,16 +180,17 @@ jobs:
           # Noms fixes en plus des noms complets : liens de téléchargement stables.
           cp dist/*.deb dist/disc-launcher_dev_amd64.deb
           cp "$(ls dist/*.pkg.tar.zst | head -n 1)" dist/disc-launcher-dev-x86_64.pkg.tar.zst
+          cp "$(ls dist/service.disc-launcher-*.zip | head -n 1)" dist/service.disc-launcher_dev.zip
           ls -la dist
           # L'étiquette « dev » suit le dernier commit de main (pas de nouveau
           # déclenchement : un push fait avec le jeton du workflow n'en déclenche pas).
           git tag -f dev
           git push -f origin refs/tags/dev
-          notes="Construction automatique du dernier commit de main ($(git rev-parse --short HEAD)) : $DEB (Debian/Ubuntu), $ARCH (Arch). Remplacée à chaque push. Pour une version stable, voir les versions vX.Y.Z."
+          notes="Construction automatique du dernier commit de main ($(git rev-parse --short HEAD)) : $DEB (Debian/Ubuntu), $ARCH (Arch), et l'extension Kodi service.disc-launcher (.zip, à installer dans Kodi par « Installer depuis un fichier zip »). Remplacée à chaque push. Pour une version stable, voir les versions vX.Y.Z."
           if gh release view dev >/dev/null 2>&1; then
             gh release view dev --json assets --jq '.assets[].name' | while read -r a; do gh release delete-asset dev "$a" -y; done
             gh release edit dev --title "Développement ($DEB)" --notes "$notes" --prerelease
           else
             gh release create dev --title "Développement ($DEB)" --notes "$notes" --prerelease --target "$GITHUB_SHA"
           fi
-          gh release upload dev dist/*.deb dist/*.pkg.tar.zst --clobber
+          gh release upload dev dist/*.deb dist/*.pkg.tar.zst dist/*.zip --clobber
