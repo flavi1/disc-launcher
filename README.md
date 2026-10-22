@@ -211,8 +211,12 @@ L'émulateur par défaut est RetroArch : Mupen64Plus-Next pour les ROM N64, **Do
 Les disques `sd*` amovibles ou reliés au bus USB (clés, disques durs, cartes mémoire) et les cartes SD des lecteurs intégrés (`mmcblk*`, mémoire eMMC interne exclue) sont sondés toutes les deux secondes (sysfs, base d'udev, sinon udisks2), partition par partition. Chaque volume formaté apparaît comme « Volume USB — étiquette (taille) » (ou « Carte mémoire — … »), avec une barre d'espace libre quand il est monté :
 
 - **Ouvrir dans le gestionnaire de fichiers** (monte au besoin) ;
-- monté : **Démonter**, et **Retirer en toute sécurité** (icône d'éjection : démontage puis mise hors tension, par udisks2) ;
+- monté : **Démonter**, et **Retirer en toute sécurité** (icône d'éjection : démontage de toutes les partitions du périphérique, puis mise hors tension, par udisks2) ;
 - démonté : **Monter**, et l'indication « Vous pouvez retirer ce périphérique en toute sécurité ».
+
+Après **Démonter** ou **Retirer en toute sécurité**, une notification confirme que le périphérique peut être retiré.
+
+**Plusieurs partitions sur une même clé** : chaque partition montable a sa ligne, nommée par son étiquette, sinon « modèle (sdb2) ». Les partitions non montables ou masquées par le système sont ignorées tant qu'elles ne sont pas montées : échange, LVM, RAID, LUKS chiffré, partition système EFI d'une clé d'installation, `UDISKS_IGNORE`. Démonter une partition alors qu'une autre l'est encore ne permet pas de retirer la clé : la notification et la ligne de la partition le signalent (« Autre partition encore montée… : sdb3 »). **Retirer en toute sécurité** reste alors proposé et démonte toutes les partitions avant la mise hors tension.
 
 La Retrode est écartée (étiquette `RETRODE`, fichier `RETRODE.CFG` ou modèle USB). `[policy] usb = "ignore"` évite l'ouverture de la fenêtre au branchement ; le volume y reste listé.
 

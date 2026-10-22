@@ -46,6 +46,8 @@ pub fn t(key: &str) -> &'static str {
         "vinyl-stop-first" => "Arrêtez l'écoute avant d'encoder", "Stop listening before encoding";
         "safe-to-remove" => "Vous pouvez retirer ce périphérique en toute sécurité.", "This device can be safely removed.";
         "free-of" => "libres sur", "free of";
+        "unmounted" => "démonté", "unmounted";
+        "still-mounted" => "Autre partition encore montée, à démonter avant de retirer le périphérique :", "Another partition is still mounted; unmount it before removing the device:";
         "open-tray" => "Ouvrir le plateau", "Open tray";
         "close-tray" => "Fermer le plateau", "Close tray";
         "drive" => "Lecteur optique", "Optical drive";

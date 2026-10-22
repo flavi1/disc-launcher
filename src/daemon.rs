@@ -109,6 +109,8 @@ enum Event {
     Vinyl(Option<crate::vinyl::Turntable>, bool),
     /// Erreur survenue dans un fil d'action, à signaler.
     Error(String, String),
+    /// Information à notifier : (titre, texte, icône).
+    Info(String, String, String),
     Control(Value, Sender<Value>),
     JobUpdate(String),
 }
@@ -653,6 +655,16 @@ impl Daemon {
                     // Montage ou démontage : actions mises à jour, sans nouvelle notification.
                     d.offer = Some(usb_offer(&vol));
                 }
+                // Autres partitions de la même clé : leur état (« encore montée »…) suit.
+                if !vol.disk.is_empty() {
+                    for (k, other) in self.drives.iter_mut() {
+                        if *k != dev && other.offer.is_some() {
+                            if let Some(ov) = other.usb.as_ref().filter(|o| o.disk == vol.disk) {
+                                other.offer = Some(usb_offer(ov));
+                            }
+                        }
+                    }
+                }
             }
             Event::Usb(dev, None, _) => {
                 self.close_offer(&dev);
@@ -688,6 +700,12 @@ impl Daemon {
             }
             Event::Panel(e) => self.on_panel(e),
             Event::Error(dev, msg) => self.error_notif(&dev, &msg),
+            Event::Info(summary, body, icon) => {
+                dl_log!(info, "daemon", format!("{summary} : {body}"));
+                if let Some(nt) = &self.notifier {
+                    nt.show(Notification { summary, body, icon, urgency: 1, timeout_ms: 8000, ..Default::default() });
+                }
+            }
             Event::Identified(dev, gen, res) => self.on_identified(&dev, gen, *res),
             Event::Prepared(dev, gen, res) => self.on_prepared(&dev, gen, *res),
             Event::Encbd(dev, gen, res, known) => self.on_encbd(&dev, gen, *res, known),
@@ -1662,18 +1680,25 @@ impl Daemon {
                 let tx = self.tx.clone();
                 let key = key.to_string();
                 std::thread::spawn(move || {
-                    let mounted = crate::device::find_mount_point(&v.dev).is_some();
                     let r = match key.as_str() {
                         "mount" => crate::dbus::udisks_mount(&v.dev).map(|_| ()),
                         "unmount" => crate::dbus::udisks_unmount(&v.dev),
-                        _ => (if mounted { crate::dbus::udisks_unmount(&v.dev) } else { Ok(()) }).and_then(|_| crate::dbus::udisks_power_off(&v.dev)),
+                        // Retrait : toutes les partitions montées du disque, puis mise hors tension.
+                        _ => usb_safe_remove(&v),
                     };
                     match r {
-                        Ok(()) => dl_log!(info, "usb", "action effectuée", "device" => v.dev, "action" => key),
+                        Ok(()) => {
+                            dl_log!(info, "usb", "action effectuée", "device" => v.dev, "action" => key);
+                            if key != "mount" {
+                                let _ = tx.send(usb_removal_info(&v, &crate::usb::mounted_on_disk(&v.disk)));
+                            }
+                        }
                         Err(e) => {
                             let _ = tx.send(Event::Error(v.dev.clone(), format!("{} : {e}", t(&key))));
                         }
                     }
+                    // État à jour sans attendre le sondage.
+                    let _ = tx.send(Event::Usb(v.dev.clone(), crate::usb::list().into_iter().find(|x| x.dev == v.dev), false));
                 });
             }
             _ => return false,
@@ -2101,16 +2126,45 @@ fn offer_icon(o: &Offer, ident: Option<&IdentResult>) -> String {
 }
 
 /// Proposition pour une clé USB : ouvrir, monter ou démonter, retirer.
+/// Retrait sûr : démonte chaque partition montée du disque, puis le met hors tension.
+fn usb_safe_remove(v: &crate::usb::Volume) -> std::io::Result<()> {
+    let mut mounted = crate::usb::mounted_on_disk(&v.disk);
+    if v.disk.is_empty() && crate::device::find_mount_point(&v.dev).is_some() {
+        mounted.push((v.dev.clone(), PathBuf::new()));
+    }
+    for (d, m) in mounted {
+        crate::dbus::udisks_unmount(&d).map_err(|e| std::io::Error::other(format!("{} ({}) : {e}", d.trim_start_matches("/dev/"), m.display())))?;
+    }
+    crate::dbus::udisks_power_off(&v.dev)
+}
+
+/// Notification après un démontage : retrait possible, ou partitions encore montées.
+fn usb_removal_info(v: &crate::usb::Volume, still: &[(String, PathBuf)]) -> Event {
+    let kind = if v.sd { t("sd-card") } else { t("usb-key") };
+    if still.is_empty() {
+        let what = if v.parts > 1 && !v.model.is_empty() { v.model.clone() } else { v.name() };
+        Event::Info(format!("{kind} — {what}"), t("safe-to-remove").into(), "media-removable".into())
+    } else {
+        let list = still.iter().map(|(d, m)| format!("{} ({})", d.trim_start_matches("/dev/"), m.display())).collect::<Vec<_>>().join(", ");
+        Event::Info(format!("{kind} — {} : {}", v.name(), t("unmounted")), format!("{} {list}", t("still-mounted")), "dialog-warning".into())
+    }
+}
+
 pub fn usb_offer(v: &crate::usb::Volume) -> Offer {
     let mounted = v.mount.is_some() || crate::device::find_mount_point(&v.dev).is_some();
+    // Autres partitions de la même clé encore montées.
+    let others: Vec<(String, PathBuf)> = crate::usb::mounted_on_disk(&v.disk).into_iter().filter(|(d, _)| *d != v.dev).collect();
     let mut actions = vec![("open-files".to_string(), t("open-files").to_string())];
     if !v.dev.starts_with("usb:") {
-        // Démonté : rien à faire avant de le retirer (indication, pas d'action).
+        // Démonté : rien à faire avant de le retirer (indication, pas d'action),
+        // sauf si une autre partition de la clé est montée.
         if mounted {
             actions.push(("unmount".into(), t("unmount").into()));
-            actions.push(("safe-remove".into(), t("safe-remove").into()));
         } else {
             actions.push(("mount".into(), t("mount").into()));
+        }
+        if mounted || !others.is_empty() {
+            actions.push(("safe-remove".into(), t("safe-remove").into()));
         }
     }
     let size = if v.size > 0 { format!(" ({})", crate::usb::human_size(v.size)) } else { String::new() };
@@ -2118,7 +2172,8 @@ pub fn usb_offer(v: &crate::usb::Volume) -> Offer {
     let model = if v.model.is_empty() || v.label.is_empty() { String::new() } else { format!("{} · ", v.model) };
     let where_ = match &v.mount {
         Some(m) => format!("{model}{} {}", t("mounted-on"), m.display()),
-        None => format!("{model}{} {}", t("not-mounted"), t("safe-to-remove")),
+        None if others.is_empty() => format!("{model}{} {}", t("not-mounted"), t("safe-to-remove")),
+        None => format!("{model}{} — {} {}", t("not-mounted"), t("still-mounted"), others.iter().map(|(d, _)| d.trim_start_matches("/dev/")).collect::<Vec<_>>().join(", ")),
     };
     Offer {
         handler: "usb".into(),
@@ -2581,7 +2636,7 @@ pub fn start_verify(dev: &str, o: &Offer) -> Result<String, String> {
 
 #[cfg(test)]
 mod autorun_tests {
-    use super::resolve_autorun;
+    use super::{resolve_autorun, t, usb_offer, usb_removal_info, Event, PathBuf};
     fn a(keys: &[&str]) -> Vec<(String, String)> {
         keys.iter().map(|k| (k.to_string(), String::new())).collect()
     }
@@ -2610,6 +2665,23 @@ mod autorun_tests {
         // Média : « dump » et « encode » désignent l'encodage par encbd.
         assert_eq!(resolve_autorun(&o(&["dump", "play"]), &a(&["play-disc", "encode-disc", "eject"]), true).as_deref(), Some("encode-disc"));
         assert_eq!(resolve_autorun(&o(&["encode"]), &a(&["play-disc", "eject"]), true), None);
+    }
+
+    #[test]
+    fn usb_removal_messages() {
+        let v = crate::usb::Volume { dev: "/dev/sdf2".into(), model: "Kingston DT".into(), disk: "/dev/sdf".into(), parts: 2, ..Default::default() };
+        match usb_removal_info(&v, &[]) {
+            Event::Info(s, b, _) => assert!(s.ends_with("Kingston DT") && b == t("safe-to-remove"), "{s} / {b}"),
+            _ => panic!(),
+        }
+        match usb_removal_info(&v, &[("/dev/sdf3".into(), PathBuf::from("/media/u/DONNEES"))]) {
+            Event::Info(s, b, _) => assert!(s.contains("Kingston DT (sdf2)") && b.ends_with("sdf3 (/media/u/DONNEES)"), "{s} / {b}"),
+            _ => panic!(),
+        }
+        // Volume sans partition voisine : le statut annonce le retrait possible.
+        let o = usb_offer(&crate::usb::Volume { dev: "/dev/sdz9".into(), label: "CLE".into(), disk: "/dev/sdz".into(), parts: 1, ..Default::default() });
+        assert!(o.describe["status"].str_or("").contains(t("safe-to-remove")));
+        assert_eq!(o.actions.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["open-files", "mount"]);
     }
 
     #[test]
