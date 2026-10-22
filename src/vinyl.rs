@@ -105,6 +105,31 @@ pub fn start_listen(t: &Turntable, log: &Path) -> io::Result<Child> {
     Command::new("vinylrip").args(["--json", "listen", "--device", &t.wanted]).stdin(Stdio::piped()).stdout(out).stderr(err).spawn()
 }
 
+/// Écoute servie en flux WAV sur 127.0.0.1 (`vinylrip --json listen --http`),
+/// jouée par Kodi avec sa propre sortie audio. `on_url` reçoit l'adresse du flux.
+pub fn start_listen_http(t: &Turntable, log: &Path, on_url: impl FnOnce(String) + Send + 'static) -> io::Result<Child> {
+    if let Some(d) = log.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let err = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
+    let mut child = Command::new("vinylrip").args(["--json", "listen", "--http", "--device", &t.wanted]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(err).spawn()?;
+    let out = child.stdout.take().ok_or_else(|| io::Error::other("stdout"))?;
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut on_url = Some(on_url);
+        for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+            if let Ok(v) = crate::json::parse(line.trim()) {
+                if let Some(u) = v["url"].as_str() {
+                    if let Some(f) = on_url.take() {
+                        f(u.to_string());
+                    }
+                }
+            }
+        }
+    });
+    Ok(child)
+}
+
 /// Arrête l'écoute : fermeture de l'entrée (vinylrip coupe arecord et aplay),
 /// puis arrêt forcé après 3 s.
 pub fn stop_listen(mut child: Child) {

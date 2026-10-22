@@ -30,13 +30,16 @@ pub mod generic;
 pub mod handlers;
 pub mod helper_profiles;
 pub mod jobs;
+pub mod kodi;
 pub mod media;
 pub mod naming;
 pub mod refdb;
 pub mod retroarch;
 pub mod sqlite;
+pub mod task;
 pub mod usb;
 pub mod vinyl;
+pub mod vinylsession;
 
 pub mod control;
 pub mod daemon;

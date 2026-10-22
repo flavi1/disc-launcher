@@ -61,6 +61,23 @@ panel = "auto"
 # video_dir = "~/Vidéos"
 # online = false             # défaut : réglage d'encbd (ONLINE_LOOKUP)
 
+[kodi]
+# Interface Kodi (extension service.disc-launcher) : propositions, tâches et
+# notifications dans Kodi dès qu'il tourne avec l'extension.
+enabled = true
+# Bibliothèque Kodi mise à jour après un encodage (encbd, vinyle)
+library_update = true
+# Surcharges, toutes actives par défaut ; « false » en désactive une (voir le README) :
+# [kodi.override]
+# play-disc = false
+# open-files = false
+# encode-disc = false
+# eject = false
+# listen = false
+# play-existing = false
+# notifications = false
+# custom = false
+
 [tray]
 # Icône de la zone de notification (StatusNotifierItem) : un clic affiche ou
 # masque la fenêtre.

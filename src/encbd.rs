@@ -211,6 +211,35 @@ pub fn lines(p: &Value, known_copy: Option<&str>) -> Vec<String> {
     out
 }
 
+/// Signification d'un code de sortie d'encbd.
+pub fn exit_message(code: i32) -> &'static str {
+    let en = crate::notify::t("play") == "Play";
+    match (code, en) {
+        (1, false) => "Erreur d'usage (commande ou options invalides).",
+        (1, true) => "Usage error (invalid command or options).",
+        (2, false) => "Prérequis manquant, ou encodage annulé.",
+        (2, true) => "Missing prerequisite, or encoding cancelled.",
+        (3, false) => "Source illisible : pas de disque, ou montage impossible.",
+        (3, true) => "Unreadable source: no disc, or cannot mount it.",
+        (4, false) => "Disque illisible par le moteur (UHD notamment) ou non pris en charge.",
+        (4, true) => "Disc unreadable by the engine (UHD especially) or not supported.",
+        (5, false) => "Déchiffrement impossible (clé MakeMKV, KEYDB, BD+).",
+        (5, true) => "Decryption failed (MakeMKV key, KEYDB, BD+).",
+        (6, false) => "Espace disque insuffisant.",
+        (6, true) => "Not enough disk space.",
+        (7, false) => "Échec du rip.",
+        (7, true) => "Rip failed.",
+        (8, false) => "Échec de l'encodage ou du multiplexage.",
+        (8, true) => "Encoding or muxing failed.",
+        (127, false) => "encbd introuvable.",
+        (127, true) => "encbd not found.",
+        (c, false) if c < 0 => "Interrompu par un signal.",
+        (c, true) if c < 0 => "Interrupted by a signal.",
+        (_, false) => "Erreur inconnue.",
+        (_, true) => "Unknown error.",
+    }
+}
+
 /// Clé de la collection pour un disque encodé par encbd.
 pub fn collection_key(fingerprint: &str) -> String {
     format!("encbd:{fingerprint}")

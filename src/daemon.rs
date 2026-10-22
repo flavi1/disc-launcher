@@ -111,6 +111,16 @@ enum Event {
     Error(String, String),
     Control(Value, Sender<Value>),
     JobUpdate(String),
+    /// Extension Kodi connectée (n° de connexion, socket pour écrire).
+    KodiAttach(u64, UnixStream),
+    /// Message de l'extension Kodi n°.
+    Kodi(u64, crate::kodi::Msg),
+    /// Commande à transmettre à Kodi (depuis un fil d'action).
+    KodiSend(Value),
+    /// Événement de la session vinylrip du périphérique.
+    VinylSession(String, Value),
+    /// Écoute du vinyle servie en flux : (périphérique, adresse).
+    ListenUrl(String, String),
 }
 
 pub struct Daemon {
@@ -147,6 +157,19 @@ pub struct Daemon {
     listening: Option<(String, std::process::Child)>,
     /// Encodage vinylrip en cours dans un terminal : (périphérique, PID du terminal).
     encoding: Option<(String, u32)>,
+    /// Extension Kodi connectée.
+    kodi: Option<crate::kodi::Conn>,
+    kodi_req: u64,
+    /// Commandes Kodi attendant leur acquittement (`done`).
+    kodi_waits: HashMap<u64, Sender<()>>,
+    /// Commandes lancées en arrière-plan (encbd, actions personnalisées).
+    tasks: Vec<crate::task::Task>,
+    task_seq: u32,
+    /// Encodage du vinyle piloté (vinylrip --json session).
+    vsession: Option<crate::vinylsession::Session>,
+    /// « Lire avec Kodi » alors que Kodi était arrêté : commande transmise à
+    /// l'extension dès sa connexion (Kodi démarré par disc-launcher-player-kodi).
+    kodi_pending: Option<(Instant, Value)>,
 }
 
 /// Lance le démon (bloquant). Renvoie un code de sortie.
@@ -272,6 +295,13 @@ pub fn run(foreground: bool) -> i32 {
         panel_starts: 0,
         listening: None,
         encoding: None,
+        kodi: None,
+        kodi_req: 0,
+        kodi_waits: HashMap::new(),
+        tasks: vec![],
+        task_seq: 0,
+        vsession: None,
+        kodi_pending: None,
     };
     d.panel_cmd = crate::panel::command(&d.cfg);
     d.panel_ok = d.panel_cmd.is_some();
@@ -495,6 +525,29 @@ fn handle_client(s: UnixStream, tx: Sender<Event>) {
     let mut w = s;
     let mut line = String::new();
     while r.read_line(&mut line).map(|n| n > 0).unwrap_or(false) {
+        // Extension Kodi : la connexion reste ouverte, dans les deux sens.
+        if let Ok(req) = json::parse(line.trim()) {
+            if req["cmd"].as_str() == Some("attach-ui") {
+                static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                let id = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let _ = w.set_read_timeout(None);
+                let Ok(wc) = w.try_clone() else { return };
+                if tx.send(Event::KodiAttach(id, wc)).is_err() {
+                    return;
+                }
+                line.clear();
+                while r.read_line(&mut line).map(|n| n > 0).unwrap_or(false) {
+                    if let Some(m) = crate::kodi::parse(&line) {
+                        if tx.send(Event::Kodi(id, m)).is_err() {
+                            return;
+                        }
+                    }
+                    line.clear();
+                }
+                let _ = tx.send(Event::Kodi(id, crate::kodi::Msg::Gone));
+                return;
+            }
+        }
         let resp = match json::parse(line.trim()) {
             Ok(req) => {
                 let (rtx, rrx) = mpsc::channel();
@@ -555,7 +608,7 @@ impl Daemon {
         if !path.is_file() {
             return;
         }
-        let busy = !self.active_jobs.is_empty() || self.drives.values().any(|d| !matches!(d.state, DState::Empty | DState::Idle | DState::Failed));
+        let busy = !self.active_jobs.is_empty() || !self.tasks.is_empty() || self.vsession.is_some() || self.drives.values().any(|d| !matches!(d.state, DState::Empty | DState::Idle | DState::Failed));
         if busy {
             return;
         }
@@ -593,6 +646,7 @@ impl Daemon {
 
     fn tick(&mut self) {
         self.refresh_vinyl();
+        self.poll_tasks();
         let now = Instant::now();
         let due: Vec<String> = self.drives.values().filter(|d| d.due.map_or(false, |t| t <= now)).map(|d| d.dev.clone()).collect();
         for dev in due {
@@ -723,6 +777,14 @@ impl Daemon {
             Event::Control(req, reply) => {
                 let r = self.control(&req);
                 let _ = reply.send(r);
+            }
+            Event::KodiAttach(id, w) => self.kodi_attach(id, w),
+            Event::Kodi(id, m) => self.on_kodi(id, m),
+            Event::KodiSend(v) => self.kodi_send(v),
+            Event::VinylSession(dev, ev) => self.on_vinyl_event(&dev, ev),
+            Event::ListenUrl(dev, url) => {
+                let name = self.drives.get(&dev).and_then(|d| d.vinyl.as_ref()).map(|v| v.name.clone()).unwrap_or_default();
+                self.kodi_send(jobj! {"type" => "play", "file" => url, "title" => format!("{} — {name}", t("vinyl")), "id" => dev, "stop_key" => "stop-listen"});
             }
             Event::JobUpdate(id) => {
                 if !self.active_jobs.contains(&id) {
@@ -1087,10 +1149,13 @@ impl Daemon {
 
     /// La fenêtre « Disques et périphériques » remplace les notifications.
     fn use_panel(&self) -> bool {
-        self.panel_ok && self.panel_cmd.is_some()
+        self.use_kodi() || (self.panel_ok && self.panel_cmd.is_some())
     }
 
     fn start_panel(&mut self) {
+        if self.use_kodi() {
+            return;
+        }
         let Some(cmd) = self.panel_cmd.clone() else { return };
         if self.panel.is_some() || !self.panel_ok || self.panel_starts >= 5 {
             return;
@@ -1127,15 +1192,7 @@ impl Daemon {
             PanelEvent::Hidden => self.hide_all(),
             PanelEvent::Action(id, key) => {
                 dl_log!(info, "panel", "action choisie", "drive" => id, "action" => key);
-                if let Some(j) = id.strip_prefix("job:") {
-                    if key == "cancel" {
-                        if let Err(e) = jobs::cancel(j) {
-                            dl_log!(warn, "job", e, "job" => j);
-                        }
-                    }
-                    return;
-                }
-                self.act(&id, &key);
+                self.ui_action(&id, &key);
             }
             PanelEvent::Exited(_) => {
                 let code = self.panel.as_mut().and_then(|p| {
@@ -1162,6 +1219,301 @@ impl Daemon {
                 self.panel_ready = false;
             }
         }
+    }
+
+    /// Action choisie dans la fenêtre GTK ou dans Kodi.
+    fn ui_action(&mut self, id: &str, key: &str) {
+        if let Some(j) = id.strip_prefix("job:") {
+            if key == "cancel" {
+                if let Err(e) = jobs::cancel(j) {
+                    dl_log!(warn, "job", e, "job" => j);
+                }
+            }
+            return;
+        }
+        if let Some(n) = id.strip_prefix(crate::task::PREFIX).and_then(|n| n.parse::<u32>().ok()) {
+            if key == "cancel" {
+                if let Some(tk) = self.tasks.iter_mut().find(|x| x.id == n) {
+                    dl_log!(info, "task", "annulation", "task" => tk.title);
+                    tk.cancel();
+                }
+            }
+            return;
+        }
+        self.act(id, key);
+    }
+
+    // ------------------------------------------------------------ Kodi
+
+    /// L'extension Kodi est connectée et autorisée : elle sert d'interface.
+    fn use_kodi(&self) -> bool {
+        self.kodi.is_some() && crate::kodi::enabled(&self.cfg)
+    }
+
+    fn kodi_override(&self, key: &str) -> bool {
+        self.use_kodi() && crate::kodi::override_on(&self.cfg, key)
+    }
+
+    fn kodi_notifications(&self) -> bool {
+        self.kodi_override("notifications")
+    }
+
+    fn kodi_send(&mut self, v: Value) {
+        if !self.use_kodi() {
+            return;
+        }
+        let failed = match self.kodi.as_mut() {
+            Some(k) => k.send(&v).is_err(),
+            None => false,
+        };
+        if failed {
+            dl_log!(warn, "kodi", "envoi impossible : extension déconnectée");
+            self.kodi_detach();
+        }
+    }
+
+    /// Commande acquittée par l'extension : renvoie de quoi attendre le `done`.
+    fn kodi_request(&mut self, mut v: Value) -> Option<mpsc::Receiver<()>> {
+        if !self.use_kodi() {
+            return None;
+        }
+        self.kodi_req += 1;
+        let req = self.kodi_req;
+        v.set("req", req as i64);
+        let (stx, srx) = mpsc::channel();
+        self.kodi_waits.insert(req, stx);
+        self.kodi_send(v);
+        Some(srx)
+    }
+
+    fn kodi_attach(&mut self, id: u64, w: UnixStream) {
+        dl_log!(info, "kodi", "extension Kodi connectée", "conn" => id);
+        self.kodi = Some(crate::kodi::Conn::new(id, w));
+        if !crate::kodi::enabled(&self.cfg) {
+            return;
+        }
+        // La fenêtre GTK cède la place à Kodi.
+        self.panel = None;
+        self.panel_ready = false;
+        // Kodi démarré pour lire un disque : le lire.
+        if let Some((at, m)) = self.kodi_pending.take() {
+            if at.elapsed() < Duration::from_secs(180) {
+                self.kodi_send(m);
+                return;
+            }
+        }
+        // Disque déjà présent au démarrage de Kodi : le proposer.
+        if self.drives.values().any(|d| d.offer.is_some() && d.state != DState::Job) {
+            self.panel_visible = true;
+            self.panel_raise = true;
+        }
+    }
+
+    fn kodi_detach(&mut self) {
+        if self.kodi.take().is_some() {
+            dl_log!(info, "kodi", "extension Kodi déconnectée : retour à la fenêtre du bureau");
+            self.kodi_waits.clear();
+            self.panel_starts = 0;
+        }
+    }
+
+    fn on_kodi(&mut self, id: u64, m: crate::kodi::Msg) {
+        use crate::kodi::Msg;
+        if self.kodi.as_ref().map(|k| k.id) != Some(id) {
+            return;
+        }
+        match m {
+            Msg::Hello(v) => {
+                if let Some(k) = self.kodi.as_mut() {
+                    k.kodi = v["kodi"].str_or("").to_string();
+                    k.addon = v["addon"].str_or("").to_string();
+                }
+                dl_log!(info, "kodi", "Kodi prêt", "kodi" => v["kodi"].str_or("?"), "addon" => v["addon"].str_or("?"));
+            }
+            Msg::Action(dev, key) => {
+                dl_log!(info, "kodi", "action choisie", "drive" => dev, "action" => key);
+                self.ui_action(&dev, &key);
+            }
+            Msg::Hidden => self.hide_all(),
+            Msg::Done(req) => {
+                if let Some(w) = self.kodi_waits.remove(&req) {
+                    let _ = w.send(());
+                }
+            }
+            Msg::Gone => self.kodi_detach(),
+        }
+    }
+
+    /// Texte long (explications, journal) : Kodi, sinon boîte de texte du bureau.
+    fn show_text(&mut self, title: &str, text: &str) {
+        if self.use_kodi() {
+            self.kodi_send(jobj! {"type" => "text", "title" => title, "text" => text});
+            return;
+        }
+        let title = title.to_string();
+        let text = text.to_string();
+        std::thread::spawn(move || notify::text_box(&title, &text));
+    }
+
+    // ------------------------------------------------------------ tâches
+
+    fn start_task(&mut self, title: &str, dev: &str, argv: &[String], meta: Value) {
+        self.task_seq += 1;
+        let id = self.task_seq;
+        let log = paths::log_dir().join(format!("task-{id}.log"));
+        match crate::task::Task::spawn(id, title, dev, argv, &log, meta) {
+            Ok(tk) => {
+                dl_log!(info, "task", "commande lancée en arrière-plan", "task" => title, "cmd" => argv.join(" "), "log" => log.display());
+                self.tasks.push(tk);
+                self.panel_visible = self.panel_visible || self.use_kodi();
+            }
+            Err(e) => self.error_notif(dev, &format!("{} : {e}", argv[0])),
+        }
+    }
+
+    fn poll_tasks(&mut self) {
+        let mut finished = vec![];
+        let mut i = 0;
+        while i < self.tasks.len() {
+            if let Some(code) = self.tasks[i].poll() {
+                finished.push((self.tasks.remove(i), code));
+            } else {
+                i += 1;
+            }
+        }
+        for (tk, code) in finished {
+            self.task_finished(tk, code);
+        }
+    }
+
+    fn task_finished(&mut self, tk: crate::task::Task, code: i32) {
+        dl_log!(info, "task", "commande terminée", "task" => tk.title, "code" => code);
+        let encbd = tk.meta["kind"].as_str() == Some("encbd");
+        if tk.cancelled {
+            self.kodi_or_notify(&tk.title, t("job-cancelled"), false);
+            return;
+        }
+        if code != 0 {
+            let reason = if encbd { crate::encbd::exit_message(code).to_string() } else { format!("code {code}") };
+            let text = format!("{reason}\n\n{} ({}) :\n{}", t("task-log"), tk.log.display(), tk.tail(6000).trim_end());
+            self.show_text(&format!("{} — {}", t("job-failed"), tk.title), &text);
+            if !self.use_kodi() {
+                self.error_notif(&tk.dev, &format!("{} : {reason}", tk.title));
+            }
+            return;
+        }
+        if encbd {
+            let path = tk.meta["path"].str_or("").to_string();
+            let media = tk.meta["media"].str_or("video").to_string();
+            let folder = if media == "music" { path.clone() } else { Path::new(&path).parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default() };
+            let folder = if folder.is_empty() { tk.meta["dest"].str_or("").to_string() } else { folder };
+            if self.use_kodi() && crate::kodi::library_update(&self.cfg) && !folder.is_empty() {
+                self.kodi_send(jobj! {"type" => "library", "kind" => if media == "music" { "music" } else { "video" }, "path" => folder.clone()});
+            }
+            if self.use_kodi() {
+                self.kodi_send(jobj! {"type" => "finished", "title" => tk.meta["name"].str_or(&tk.title), "kind" => media, "path" => path, "folder" => folder});
+                return;
+            }
+        }
+        self.kodi_or_notify(&tk.title, t("task-done"), false);
+    }
+
+    /// Notification simple (Kodi ou bureau).
+    fn kodi_or_notify(&mut self, title: &str, message: &str, error: bool) {
+        if self.kodi_notifications() {
+            self.kodi_send(jobj! {"type" => "notify", "title" => title, "message" => message, "icon" => if error { "error" } else { "info" }, "error" => error});
+        } else if let Some(nt) = &self.notifier {
+            nt.show(Notification { summary: title.into(), body: message.into(), icon: if error { "dialog-error" } else { "dialog-information" }.into(), urgency: 1, timeout_ms: 8000, ..Default::default() });
+        }
+    }
+
+    // ------------------------------------------------------------ session vinyle
+
+    fn vinyl_session_action(&mut self, dev: &str, key: &str) {
+        let Some(sess) = self.vsession.as_mut().filter(|s| s.dev == dev) else { return };
+        match key.strip_prefix(crate::vinylsession::PREFIX).unwrap_or("") {
+            "details" => {
+                if let Some(text) = sess.state.details() {
+                    let title = t("vinyl-session").to_string();
+                    self.show_text(&title, &text);
+                }
+                self.panel_visible = true;
+            }
+            "close" => {
+                if let Some(mut s) = self.vsession.take() {
+                    s.close();
+                }
+            }
+            _ => {
+                if let Some(cmd) = sess.state.command(key) {
+                    if let Err(e) = sess.send(&cmd) {
+                        self.error_notif(dev, &format!("vinylrip session : {e}"));
+                    }
+                }
+                if key == "vs:unlisten" {
+                    self.kodi_send(jobj! {"type" => "stop", "match" => "/vinyl.wav"});
+                }
+                // La fenêtre reste ouverte : la session se pilote pas à pas.
+                self.panel_visible = true;
+            }
+        }
+        self.refresh_vinyl();
+    }
+
+    fn on_vinyl_event(&mut self, dev: &str, ev: Value) {
+        let Some(sess) = self.vsession.as_mut().filter(|s| s.dev == dev) else { return };
+        dl_log!(debug, "vinyl", "événement de session", "event" => ev["event"].str_or("?"));
+        if ev["event"].as_str() == Some("exited") {
+            use crate::vinylsession::Phase;
+            if !matches!(sess.state.phase, Phase::Done(_) | Phase::Failed { .. } | Phase::Cancelled) {
+                sess.state.phase = Phase::Failed { message: "vinylrip s'est arrêté".into(), help: format!("{} {}", t("task-log"), paths::log_dir().join("vinylrip-session.log").display()) };
+            }
+            if matches!(sess.state.phase, Phase::Cancelled) {
+                self.vsession = None;
+            }
+            self.refresh_vinyl();
+            return;
+        }
+        let was_listening = sess.state.listen_url.clone();
+        let ended = sess.state.apply(&ev);
+        let url = sess.state.listen_url.clone();
+        let phase = sess.state.phase.clone();
+        let details = sess.state.details();
+        if url.is_some() && url != was_listening {
+            let name = self.drives.get(dev).and_then(|d| d.vinyl.as_ref()).map(|v| v.name.clone()).unwrap_or_default();
+            self.kodi_send(jobj! {"type" => "play", "file" => url.clone().unwrap_or_default(), "title" => format!("{} — {name}", t("vinyl")), "id" => dev, "stop_key" => "vs:unlisten"});
+        } else if url.is_none() && was_listening.is_some() {
+            self.kodi_send(jobj! {"type" => "stop", "match" => "/vinyl.wav"});
+        }
+        if ended {
+            use crate::vinylsession::Phase;
+            match phase {
+                Phase::Failed { .. } => {
+                    // L'explication complète s'affiche d'elle-même (avec défilement).
+                    if let Some(text) = details {
+                        self.show_text(t("vinyl-session"), &text);
+                    }
+                }
+                Phase::Done(r) => {
+                    let dir = r["album_dir"].str_or("").to_string();
+                    if self.use_kodi() && crate::kodi::library_update(&self.cfg) && !dir.is_empty() {
+                        self.kodi_send(jobj! {"type" => "library", "kind" => "music", "path" => dir.clone()});
+                    }
+                    if self.use_kodi() {
+                        self.kodi_send(jobj! {"type" => "finished", "title" => format!("{} — {}", r["artist"].str_or(""), r["album"].str_or("")), "kind" => "music", "path" => dir.clone(), "folder" => dir.clone()});
+                    } else {
+                        self.kodi_or_notify(t("vinyl-done"), &dir, false);
+                    }
+                    if let Some(text) = details {
+                        self.show_text(t("vinyl-session"), &text);
+                    }
+                }
+                Phase::Cancelled => self.vsession = None,
+                _ => {}
+            }
+        }
+        self.panel_visible = true;
+        self.refresh_vinyl();
     }
 
     /// Des propositions sont-elles affichées ?
@@ -1372,6 +1724,9 @@ impl Daemon {
                 }
             }
         }
+        for tk in &self.tasks {
+            out.push((3, tk.item(t("cancel"))));
+        }
         out.sort_by_key(|(k, _)| *k);
         out
     }
@@ -1393,6 +1748,15 @@ impl Daemon {
             }
         }
         if !self.use_panel() {
+            return;
+        }
+        if self.use_kodi() {
+            let raise = std::mem::take(&mut self.panel_raise);
+            let state = jobj! {"visible" => self.panel_visible, "raise" => raise, "title" => t("panel-title"), "empty" => t("tray-empty"), "items" => items};
+            let failed = self.kodi.as_mut().is_some_and(|k| k.send_state(&state).is_err());
+            if failed {
+                self.kodi_detach();
+            }
             return;
         }
         if self.panel.is_none() && self.panel_visible {
@@ -1428,6 +1792,22 @@ impl Daemon {
         let name = tt.as_ref().map(|x| x.name.clone()).unwrap_or_default();
         let listening = self.listening.as_ref().is_some_and(|(d, _)| d == dev);
         let encoding = self.encoding.as_ref().is_some_and(|(d, _)| d == dev);
+        if let Some(sess) = self.vsession.as_ref().filter(|s| s.dev == dev) {
+            return Offer {
+                handler: "vinyl".into(),
+                media: true,
+                handler_name: format!("{} — {name}", t("vinyl-session")),
+                tag: "vinyl".into(),
+                confidence: Confidence::Strong,
+                resolution: None,
+                target: None,
+                situation: None,
+                collision: false,
+                describe: jobj! {"status" => sess.state.lines().join("\n"), "device" => tt.as_ref().map(|x| x.wanted.clone())},
+                actions: sess.state.actions(),
+                warnings: vec![],
+            };
+        }
         let (actions, status): (Vec<(String, String)>, &str) = if encoding {
             (vec![], t("vinyl-encoding"))
         } else if listening {
@@ -1466,13 +1846,18 @@ impl Daemon {
         let devs: Vec<String> = self.drives.iter().filter(|(_, d)| d.vinyl.is_some() && d.offer.is_some()).map(|(k, _)| k.clone()).collect();
         for dev in devs {
             let o = self.vinyl_offer(&dev);
-            if self.drives.get(&dev).and_then(|d| d.offer.as_ref()).map(|x| &x.actions) != Some(&o.actions) {
+            if self.drives.get(&dev).and_then(|d| d.offer.as_ref()).map(|x| (&x.actions, &x.describe)) != Some((&o.actions, &o.describe)) {
                 self.drive(&dev).offer = Some(o);
             }
         }
     }
 
     fn remove_vinyl(&mut self, dev: &str) {
+        if self.vsession.as_ref().is_some_and(|s| s.dev == dev) {
+            if let Some(mut s) = self.vsession.take() {
+                s.close();
+            }
+        }
         if self.listening.as_ref().is_some_and(|(d, _)| d == dev) {
             if let Some((_, c)) = self.listening.take() {
                 crate::vinyl::stop_listen(c);
@@ -1488,8 +1873,21 @@ impl Daemon {
         if let Some(tt) = self.drives.get(dev).and_then(|d| d.vinyl.clone()) {
             match key {
                 "listen" => {
-                    if self.encoding.is_some() {
+                    if self.encoding.is_some() || self.vsession.is_some() {
                         self.error_notif(dev, t("vinyl-encoding"));
+                    } else if self.listening.is_none() && self.kodi_override("listen") {
+                        // Kodi : flux joué par sa propre sortie audio.
+                        let tx = self.tx.clone();
+                        let d = dev.to_string();
+                        match crate::vinyl::start_listen_http(&tt, &paths::log_dir().join("vinylrip-listen.log"), move |u| {
+                            let _ = tx.send(Event::ListenUrl(d, u));
+                        }) {
+                            Ok(c) => {
+                                dl_log!(info, "vinyl", "écoute lancée (flux pour Kodi)", "card" => tt.card_id);
+                                self.listening = Some((dev.to_string(), c));
+                            }
+                            Err(e) => self.error_notif(dev, &format!("vinylrip listen : {e}")),
+                        }
                     } else if self.listening.is_none() {
                         match crate::vinyl::start_listen(&tt, &paths::log_dir().join("vinylrip-listen.log")) {
                             Ok(c) => {
@@ -1504,25 +1902,30 @@ impl Daemon {
                     if let Some((_, c)) = self.listening.take() {
                         crate::vinyl::stop_listen(c);
                         dl_log!(info, "vinyl", "écoute arrêtée");
+                        self.kodi_send(jobj! {"type" => "stop", "match" => "/vinyl.wav"});
                     }
                 }
                 "encode" => {
                     if self.listening.is_some() {
                         self.error_notif(dev, t("vinyl-stop-first"));
-                    } else if self.encoding.is_none() {
-                        let argv = crate::vinyl::record_argv(&tt);
-                        match crate::terminal::command(&self.cfg, &argv) {
-                            Some(cmd) => match crate::generic::spawn_detached(&cmd, &paths::log_dir().join("vinylrip-record.log")) {
-                                Ok(pid) => {
-                                    dl_log!(info, "vinyl", "encodage lancé dans un terminal", "cmd" => cmd.join(" "));
-                                    self.encoding = Some((dev.to_string(), pid));
-                                }
-                                Err(e) => self.error_notif(dev, &e),
-                            },
-                            None => self.error_notif(dev, "aucun terminal trouvé (réglez [general] terminal_command)"),
+                    } else if self.vsession.is_none() {
+                        // Session pilotée : boutons dans la fenêtre (ou dans Kodi), sans terminal.
+                        let http = self.use_kodi() && self.kodi_override("listen");
+                        let tx = self.tx.clone();
+                        let d = dev.to_string();
+                        match crate::vinylsession::Session::start(dev, &tt.wanted, http, move |v| {
+                            let _ = tx.send(Event::VinylSession(d.clone(), v));
+                        }) {
+                            Ok(sess) => {
+                                dl_log!(info, "vinyl", "session d'encodage lancée", "card" => tt.card_id, "kodi" => http);
+                                self.vsession = Some(sess);
+                                self.panel_visible = true;
+                            }
+                            Err(e) => self.error_notif(dev, &format!("vinylrip session : {e}")),
                         }
                     }
                 }
+                k if k.starts_with(crate::vinylsession::PREFIX) => self.vinyl_session_action(dev, k),
                 k if k.starts_with(crate::custom::PREFIX) => return self.perform_custom(dev, k),
                 _ => {}
             }
@@ -1544,6 +1947,11 @@ impl Daemon {
         let fp = self.drives.get(dev).and_then(|d| d.ident.as_ref()).map(|i| i.fingerprint.clone()).unwrap_or_default();
         if key == crate::encbd::OPEN_COPY {
             let Some(p) = o.describe["encbd_copy"].as_str().map(PathBuf::from) else { return };
+            if self.kodi_override(key) {
+                let m = if p.is_dir() { jobj! {"type" => "play-album", "path" => p.to_string_lossy().into_owned()} } else { jobj! {"type" => "play", "file" => p.to_string_lossy().into_owned()} };
+                self.kodi_send(m);
+                return;
+            }
             let r = if p.is_dir() { crate::filemanager::open(&self.cfg, &p).map(|_| ()) } else { crate::generic::spawn_detached(&["xdg-open".into(), p.to_string_lossy().into_owned()], &paths::log_dir().join("open-copy.log")).map(|_| ()) };
             match r {
                 Ok(()) => dl_log!(info, "encbd", "copie ouverte", "drive" => dev, "path" => p.display()),
@@ -1558,7 +1966,22 @@ impl Daemon {
         let pred = Some(&o.describe["encbd"]).filter(|v| v.as_obj().is_some());
         let dest = crate::encbd::dest_dir(&self.cfg, kind);
         let _ = std::fs::create_dir_all(&dest);
-        let argv = crate::encbd::encode_argv(&cmd, pred, dev, &dest);
+        let mut argv = crate::encbd::encode_argv(&cmd, pred, dev, &dest);
+        if self.kodi_override(key) {
+            // Sous Kodi : encbd en arrière-plan, sans question (le nom est déjà imposé).
+            argv.insert(cmd.len(), "--silent".into());
+            let title = pred.map(|p| p["title"].str_or("").to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| o.handler_name.clone());
+            let music = kind == "music";
+            let path = pred.map(|p| p["final_path"].str_or("").to_string()).unwrap_or_default();
+            if let Some(p) = pred.filter(|p| p["kind"].str_or("") != "cd" && crate::encbd::name_known(p)) {
+                crate::encbd::record(&o.handler, &fp, p["final_path"].str_or(""), p["title"].str_or(""));
+            }
+            let meta = jobj! {"kind" => "encbd", "media" => if music { "music" } else { "video" }, "path" => path, "dest" => dest.to_string_lossy().into_owned(),
+                "icon" => offer_icon(&o, None), "name" => title.clone()};
+            self.start_task(&format!("{} : {title}", t("encoding")), dev, &argv, meta);
+            self.drive(dev).state = DState::Idle;
+            return;
+        }
         let Some(full) = crate::terminal::command(&self.cfg, &argv) else {
             self.error_notif(dev, "aucun terminal trouvé (réglez [general] terminal_command)");
             return;
@@ -1600,6 +2023,14 @@ impl Daemon {
                 existing: existing.as_deref(),
                 label: label.as_deref(),
             };
+            if a.terminal && self.kodi_override(key) {
+                // Sous Kodi : pas de terminal ; suivie en arrière-plan.
+                match crate::custom::argv(&self.cfg, &a, &ctx) {
+                    Ok(argv) => self.start_task(&a.label, dev, &argv, jobj! {"kind" => "custom"}),
+                    Err(e) => self.error_notif(dev, &e),
+                }
+                return true;
+            }
             match crate::custom::run(&self.cfg, &a, &ctx) {
                 Ok(cmd) => dl_log!(info, "action", "action personnalisée lancée", "drive" => dev, "action" => a.name, "cmd" => cmd.join(" ")),
                 Err(e) => self.error_notif(dev, &e),
@@ -1615,11 +2046,25 @@ impl Daemon {
                 let tx = self.tx.clone();
                 let d = dev.to_string();
                 let known = self.files_dir(dev);
+                let kodi = self.kodi_override("open-files");
+                let handler = self.drives.get(dev).and_then(|x| x.offer.as_ref()).map(|o| o.handler.clone()).unwrap_or_default();
                 std::thread::spawn(move || {
                     let dir = match known {
                         Some(r) => r,
                         None => crate::data::ensure_mounted(&d).ok_or_else(|| format!("{d} : montage impossible")),
                     };
+                    if kodi {
+                        match dir {
+                            Ok(p) => {
+                                let w = crate::kodi::guess_window(&handler, &p);
+                                let _ = tx.send(Event::KodiSend(jobj! {"type" => "open", "window" => w, "path" => p.to_string_lossy().into_owned()}));
+                            }
+                            Err(e) => {
+                                let _ = tx.send(Event::Error(d, e));
+                            }
+                        }
+                        return;
+                    }
                     let r = dir.and_then(|p| crate::filemanager::open(&cfg, &p).map(|how| (p, how)));
                     match r {
                         Ok((p, how)) => dl_log!(info, "files", "dossier ouvert", "drive" => d, "path" => p.display(), "with" => how),
@@ -1633,10 +2078,20 @@ impl Daemon {
                 if !dev.starts_with("/dev/sr") {
                     return false;
                 }
+                // Kodi lit ce disque : arrêter la lecture d'abord (acquittée, 3 s au plus).
+                let wait = if key != "close-tray" && self.kodi_override("eject") {
+                    let mounts: Vec<Value> = crate::device::find_mount_point(dev).map(|m| Value::from(m.to_string_lossy().into_owned())).into_iter().collect();
+                    self.kodi_request(jobj! {"type" => "stop-device", "device" => dev, "paths" => mounts})
+                } else {
+                    None
+                };
                 let tx = self.tx.clone();
                 let d = dev.to_string();
                 let key = key.to_string();
                 std::thread::spawn(move || {
+                    if let Some(w) = wait {
+                        let _ = w.recv_timeout(Duration::from_secs(3));
+                    }
                     let r = if key == "close-tray" {
                         cdrom::close_tray(&d)
                     } else {
@@ -1691,6 +2146,9 @@ impl Daemon {
         self.drive(dev).state = DState::Idle;
         match key {
             "play-existing" | "play-game" => {
+                if self.kodi_override(key) {
+                    self.kodi_send(jobj! {"type" => "stop"});
+                }
                 if let Some(p) = o.situation.as_ref().and_then(|s| match s {
                     Situation::GameIncomplete { game_dir, .. } => o.target.as_ref().and_then(|t| t.m3u.clone()).filter(|m| m.exists()).or(Some(game_dir.clone())),
                     other => other.existing().map(|p| p.to_path_buf()),
@@ -1698,7 +2156,13 @@ impl Daemon {
                     play_existing(&self.cfg, &o.handler, &play_path(&p.to_string_lossy()), ident.as_ref(), o.resolution.as_ref());
                 }
             }
+            "play-disc" if self.kodi_override("play-disc") && crate::kodi::plays_disc(&o.handler) => {
+                self.kodi_send(jobj! {"type" => "play-disc", "device" => dev, "kind" => o.handler.clone()});
+            }
             "play-disc" => {
+                if o.describe["player"].as_str() == Some("kodi") && crate::kodi::enabled(&self.cfg) && crate::kodi::plays_disc(&o.handler) {
+                    self.kodi_pending = Some((Instant::now(), jobj! {"type" => "play-disc", "device" => dev, "kind" => o.handler.clone()}));
+                }
                 let cfg = self.cfg.clone();
                 let d = dev.to_string();
                 let o2 = o.clone();
@@ -1754,6 +2218,10 @@ impl Daemon {
 
     fn error_notif(&mut self, dev: &str, msg: &str) {
         dl_log!(error, "daemon", msg.to_string(), "drive" => dev);
+        if self.kodi_notifications() {
+            self.kodi_send(jobj! {"type" => "notify", "title" => t("job-failed"), "message" => msg, "icon" => "error", "error" => true});
+            return;
+        }
         let replaces = self.drives.get(dev).and_then(|d| d.notif).unwrap_or(0);
         if let Some(nt) = &self.notifier {
             let n = Notification { replaces, summary: t("job-failed").into(), body: msg.into(), icon: "dialog-error".into(), urgency: 1, timeout_ms: -1, ..Default::default() };
@@ -1885,6 +2353,10 @@ impl Daemon {
     fn control(&mut self, req: &Value) -> Value {
         match req["cmd"].str_or("") {
             "ping" => jobj! {"ok" => true, "version" => crate::VERSION},
+            "kodi" => match &self.kodi {
+                Some(k) => jobj! {"ok" => true, "connected" => true, "kodi" => k.kodi.clone(), "addon" => k.addon.clone(), "enabled" => crate::kodi::enabled(&self.cfg)},
+                None => jobj! {"ok" => true, "connected" => false, "enabled" => crate::kodi::enabled(&self.cfg)},
+            },
             "status" => {
                 let drives: Vec<Value> = self
                     .drives
