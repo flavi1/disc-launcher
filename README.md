@@ -171,9 +171,9 @@ dvd-video = ["vlc", "dvd://{device}"]
 default = ["vlc", "{mount}"]
 ```
 
-**Kodi** est un lecteur comme les autres, fourni par `disc-launcher-player-kodi`. Deux cas :
+**Kodi** est un lecteur comme les autres, fourni par `disc-launcher-player-kodi`. Avec l'extension `service.disc-launcher` (voir [Kodi](#kodi)), Kodi démarré lit directement le disque ; Kodi arrêté est démarré, et l'extension lit le disque dès sa connexion. Sans l'extension, l'ancien comportement demeure :
 
-- **Kodi tourne.** L'addon `script.disc.import` est déclenché par JSON-RPC avec `Addons.ExecuteAddon`, ce qui équivaut à `RunScript(...)`. Si JSON-RPC est fermé, l'appel passe par l'EventServer.
+- **Kodi tourne.** L'addon `addon_id` (`script.disc.import`) est déclenché par JSON-RPC avec `Addons.ExecuteAddon`, ce qui équivaut à `RunScript(...)`. Si JSON-RPC est fermé, l'appel passe par l'EventServer.
 - **Kodi ne tourne pas.** Kodi est démarré et l'addon détecte le disque lui-même. Avec `startup = "rpc"`, disc-launcher attend que Kodi réponde, puis déclenche l'addon.
 
 Les réglages de ce lecteur sont dans `[media.players.kodi]`. Côté Kodi, activez dans *Paramètres › Services › Contrôle* l'option « Autoriser le contrôle par des applications sur ce système ».
@@ -224,10 +224,47 @@ La Retrode est écartée (étiquette `RETRODE`, fichier `RETRODE.CFG` ou modèle
 
 Si [vinylrip](https://github.com/flavi1/vinylrip) est installé et que sa configuration (`~/.config/vinylrip/config.toml`) désigne une platine (`device = "…"`), disc-launcher la traite comme un disque de plus, de type « Vinyle », dès que sa carte son est branchée. La carte est reconnue comme le fait vinylrip : identifiant ALSA (`arecord -l`), `vendeur:produit` USB, ou partie du nom. Sans `device` dans la configuration de vinylrip, rien n'est détecté.
 
-- **Écouter** : `vinylrip listen` (arecord vers aplay, comme l'extension vinylrip-kodi), jusqu'à **Arrêter l'écoute**.
-- **Encoder (vinylrip)** : `vinylrip record` dans un terminal, interactif (Entrée pour démarrer et terminer chaque face, puis découpage, identification et FLAC vérifié). Indisponible pendant l'écoute ; la platine n'a plus d'action tant que le terminal est ouvert.
+- **Écouter** : `vinylrip listen` (arecord vers aplay), jusqu'à **Arrêter l'écoute**. Sous Kodi, le son passe par la sortie audio de Kodi (flux local `vinylrip listen --http`).
+- **Encoder (vinylrip)** : disc-launcher pilote `vinylrip --json session`, sans terminal. La platine affiche pas à pas **Démarrer la face A**, **Arrêter la face A**, **Écouter**, **Démarrer la face B**, **Terminer et traiter**, puis l'étape en cours (découpage, identification, encodage et vérification…) et, si plusieurs éditions sont possibles, la liste où choisir. En cas d'échec, l'explication de vinylrip (ce qui est conservé et où, la commande de reprise, l'import dans Audacity) s'ouvre en entier dans une fenêtre de texte ; elle reste accessible par **Voir les explications**. Indisponible pendant l'écoute.
 
 Catégorie d'autorun : `vinyl` (`play` y vaut « Écouter »). Si PipeWire ou PulseAudio tient la carte, l'accès direct d'arecord échoue : c'est une limite connue de vinylrip.
+
+## Kodi
+
+L'extension Kodi **`service.disc-launcher`** ([kodi-disc-launcher](https://github.com/flavi1/kodi-disc-launcher)) fait de Kodi l'interface de disc-launcher. Elle remplace les extensions `script.disc.import` et vinylrip-kodi. Dès que Kodi tourne avec l'extension, en fenêtre comme en plein écran :
+
+- les propositions (disques, cartouches, volumes, platine) s'affichent dans Kodi au lieu de la fenêtre « Disques et périphériques » ; les tâches en cours y ont leur barre de progression ;
+- les notifications passent par Kodi ;
+- certaines actions sont **surchargées** pour se faire dans Kodi (tableau ci-dessous).
+
+L'extension se connecte à la socket de contrôle du démon : aucun port réseau, aucun réglage à activer dans Kodi. Kodi doit tourner sous le même utilisateur que disc-launcher. Quand Kodi se ferme, la fenêtre du bureau reprend la main. Au démarrage, l'extension vérifie que la lecture automatique des DVD et l'action à l'insertion d'un CD audio de Kodi sont désactivées (sinon Kodi et disc-launcher réagiraient en même temps), et propose une fois de les désactiver.
+
+| Action | Sans Kodi | Surcharge sous Kodi |
+| --- | --- | --- |
+| `play-disc` (CD audio, DVD, Blu-ray, VCD) | lecteur de `[media]` | lecture du disque dans Kodi |
+| `open-copy` (copie encbd) | lecteur ou gestionnaire de fichiers | lecture du film, ou de l'album entier, dans Kodi |
+| `open-files` | gestionnaire de fichiers | fenêtre Vidéos, Musique ou Images de Kodi, selon le contenu |
+| `encode-disc` (encbd) | encbd dans un terminal | encbd en arrière-plan (`--silent`, le nom étant déjà imposé), progression dans Kodi, puis mise à jour de la bibliothèque et menu **Lire / Ouvrir le dossier / Fermer** |
+| `eject`, `open-tray` | éjection | lecture de ce disque arrêtée d'abord |
+| `listen` (vinyle) | aplay | sortie audio de Kodi ; arrêter la lecture dans Kodi arrête l'écoute |
+| `encode` (vinyle) | session pilotée dans la fenêtre | la même, dans Kodi, avec écoute par Kodi ; album ajouté à la bibliothèque |
+| `play-existing`, `play-game` | émulateur | lecture Kodi arrêtée avant le lancement |
+| `custom` (actions `terminal = true`) | dans un terminal | en arrière-plan, journal affiché en cas d'échec |
+| `notifications` | notifications du bureau | notifications de Kodi |
+
+Tout se règle dans `config.toml`, sans panneau de réglages. Les surcharges sont actives par défaut ; on les désactive une à une :
+
+```toml
+[kodi]
+enabled = true              # false : jamais d'interface Kodi
+library_update = true       # bibliothèque mise à jour après un encodage
+
+[kodi.override]
+play-disc = false           # garder le lecteur de [media] même sous Kodi
+"custom:copie" = false      # une action personnalisée précise (ou custom = false pour toutes)
+```
+
+`disc-launcher doctor` indique si l'extension est connectée.
 
 ## Encodage : CD audio, DVD et Blu-ray (encbd)
 
@@ -523,6 +560,9 @@ src/bin/disc-launcher-panel.rs   fenêtre « Disques et périphériques » (GTK 
 src/usb.rs filemanager.rs   volumes USB ; ouverture dans le gestionnaire de fichiers
 src/vinyl.rs                platine vinyle (vinylrip)
 src/encbd.rs                encodage CD audio, DVD, Blu-ray (encbd) : nom prévu, copies existantes
+src/kodi.rs                 interface Kodi (extension service.disc-launcher) et surcharges
+src/task.rs                 commandes en arrière-plan suivies dans la fenêtre (encbd, actions)
+src/vinylsession.rs         encodage du vinyle piloté (vinylrip --json session)
 data/icons/                 icônes de repli (SVG)
 packaging/                  paquets Debian (build-deb.sh) et Arch (PKGBUILD)
 .github/workflows/          tests (ci.yml) ; paquets et publication (paquets.yml)

@@ -44,6 +44,32 @@ pub fn t(key: &str) -> &'static str {
         "vinyl-listening" => "Écoute en cours", "Listening";
         "vinyl-encoding" => "Encodage en cours dans le terminal vinylrip", "Encoding in the vinylrip terminal";
         "vinyl-stop-first" => "Arrêtez l'écoute avant d'encoder", "Stop listening before encoding";
+        "vinyl-face" => "Face", "Side";
+        "vinyl-overruns" => "dépassements de tampon, des trous sont possibles : réenregistrez-la au besoin", "buffer overruns, gaps are possible: record it again if needed";
+        "vinyl-start-face" => "Démarrer la face", "Start side";
+        "vinyl-stop-face" => "Arrêter la face", "Stop side";
+        "vinyl-finish" => "Terminer et traiter", "Finish and process";
+        "vinyl-no-release" => "Aucune de ces éditions", "None of these releases";
+        "vinyl-details" => "Voir les explications", "Show details";
+        "vinyl-starting" => "Préparation de l'enregistrement…", "Preparing the recording…";
+        "vinyl-place-face" => "Posez la face A, puis démarrez", "Put on side A, then start";
+        "vinyl-faces-done" => "Faces enregistrées :", "Sides recorded:";
+        "vinyl-next-or-finish" => "face suivante, ou terminer", "next side, or finish";
+        "vinyl-recording" => "Enregistrement de la face", "Recording side";
+        "vinyl-choose" => "Plusieurs éditions possibles : choisissez", "Several possible releases: choose";
+        "vinyl-done" => "Album rangé", "Album filed";
+        "vinyl-tracks" => "pistes", "tracks";
+        "vinyl-st-split" => "Découpage de la face", "Splitting side";
+        "vinyl-st-identify" => "Identification en ligne…", "Identifying online…";
+        "vinyl-st-release" => "Édition retenue, alignement…", "Release chosen, aligning…";
+        "vinyl-st-encode" => "Encodage et vérification", "Encoding and verifying";
+        "vinyl-st-convert" => "Version réduite", "Reduced copy";
+        "vinyl-st-filed" => "Rangement…", "Filing…";
+        "vinyl-session" => "Encodage du vinyle", "Vinyl encoding";
+        "close" => "Fermer", "Close";
+        "task-done" => "Terminé", "Done";
+        "task-log" => "Journal", "Log";
+        "encoding" => "Encodage", "Encoding";
         "safe-to-remove" => "Vous pouvez retirer ce périphérique en toute sécurité.", "This device can be safely removed.";
         "free-of" => "libres sur", "free of";
         "unmounted" => "démonté", "unmounted";
@@ -328,6 +354,37 @@ pub fn dialog_tool() -> Option<&'static str> {
     let desk = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_ascii_uppercase();
     let order: &[&str] = if desk.contains("KDE") || desk.contains("LXQT") { &["kdialog", "zenity", "yad"] } else { &["zenity", "yad", "kdialog"] };
     order.iter().copied().find(|t| crate::paths::which(t).is_some())
+}
+
+/// Texte long affiché avec défilement (kdialog, zenity, yad), sinon ouvert
+/// dans l'éditeur de texte par défaut. Bloquant.
+pub fn text_box(title: &str, text: &str) {
+    let file = crate::paths::log_dir().join("message.txt");
+    if let Some(d) = file.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    if std::fs::write(&file, text).is_err() {
+        return;
+    }
+    let f = file.to_string_lossy().into_owned();
+    let mut c = match dialog_tool() {
+        Some("kdialog") => {
+            let mut c = Command::new("kdialog");
+            c.args(["--title", title, "--textbox", &f, "720", "460"]);
+            c
+        }
+        Some(tool) => {
+            let mut c = Command::new(tool);
+            c.args(["--text-info", &format!("--title={title}"), &format!("--filename={f}"), "--width=720", "--height=460"]);
+            c
+        }
+        None => {
+            let mut c = Command::new("xdg-open");
+            c.arg(&f);
+            c
+        }
+    };
+    let _ = c.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
 }
 
 /// Boîte de choix bloquante ; renvoie la clé choisie. `on_spawn` reçoit le

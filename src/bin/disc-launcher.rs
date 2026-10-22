@@ -395,6 +395,11 @@ fn doctor() {
     println!("fenêtre        : {panel}");
     println!("coquilles nat. : {}", if disclauncher::native::enabled() || disclauncher::native::system_wide() { "actives (disc-launcher native disable pour les retirer)" } else { "inactives (disc-launcher native enable, pour le mode hybride)" });
     println!("dialogue       : {}", disclauncher::notify::dialog_tool().unwrap_or("aucun"));
+    println!("Kodi           : {}", match control::request(&jobj! {"cmd" => "kodi"}, std::time::Duration::from_secs(3)) {
+        Ok(r) if r["connected"].bool_or(false) => format!("extension connectée (Kodi {}, extension {}){}", r["kodi"].str_or("?"), r["addon"].str_or("?"), if r["enabled"].bool_or(true) { " : interface et surcharges actives" } else { " mais [kodi] enabled = false" }),
+        Ok(_) => "extension non connectée (Kodi arrêté, ou extension service.disc-launcher absente)".into(),
+        Err(_) => "démon arrêté".into(),
+    });
     println!("encbd          : {}", match disclauncher::encbd::command(&cfg) {
         Some(c) => format!("{} (CD audio → {}, DVD/Blu-ray → {})", c.join(" "), disclauncher::encbd::dest_dir(&cfg, "music").display(), disclauncher::encbd::dest_dir(&cfg, "video").display()),
         None => "absent ou désactivé (encodage des CD audio, DVD et Blu-ray indisponible)".into(),

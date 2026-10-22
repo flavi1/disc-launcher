@@ -355,11 +355,35 @@ with open({states!r}, "a") as log:
 cards = os.path.join(ROOT, "asound-cards")
 write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n 1 [Device         ]: USB-Audio - USB Audio CODEC\n")
 write(os.path.join(HOME, ".config/vinylrip/config.toml"), 'device = "Device"\n')
-write(os.path.join(FAKE, "vinylrip"), f"""#!/bin/sh
-case "$*" in
-  *listen*) echo listening > {ROOT}/vinyl-listen; cat > /dev/null; echo stopped > {ROOT}/vinyl-listen ;;
-  *record*) echo "$*" > {ROOT}/vinyl-record ;;
-esac
+write(os.path.join(FAKE, "vinylrip"), f"""#!/usr/bin/env python3
+import json, sys
+a = sys.argv[1:]
+def out(e):
+    print(json.dumps(e), flush=True)
+if "listen" in a:
+    open("{ROOT}/vinyl-listen", "w").write("listening-http" if "--http" in a else "listening")
+    if "--http" in a:
+        out({{"event": "listening", "on": True, "url": "http://127.0.0.1:9/vinyl.wav"}})
+    sys.stdin.read()
+    open("{ROOT}/vinyl-listen", "w").write("stopped")
+elif "session" in a:
+    out({{"event": "ready", "job": "/j", "quality": "48 kHz"}})
+    faces = 0
+    for line in sys.stdin:
+        c = json.loads(line)
+        cmd = c.get("cmd")
+        if cmd == "start_face":
+            out({{"event": "recording", "face": "AB"[faces], "disc": 1}})
+        elif cmd == "listen":
+            out({{"event": "listening", "on": c.get("on", True), **({{"url": "http://127.0.0.1:9/vinyl.wav"}} if c.get("http") and c.get("on", True) else {{}})}})
+        elif cmd == "stop_face":
+            out({{"event": "face_done", "face": "AB"[faces], "seconds": 1200, "overruns": 0}}); faces += 1
+        elif cmd == "finish":
+            out({{"event": "stage", "stage": "encode", "track": 1, "of": 8}})
+            out({{"event": "error", "message": "flac a échoué", "stage": "encode", "help": "Reprendre :\\n  vinylrip process /j", "resume": "vinylrip process /j"}})
+            break
+        elif cmd == "cancel":
+            out({{"event": "cancelled", "deleted": False, "kept": "/j"}}); break
 """, 0o755)
 write(os.path.join(FAKE, "faketerm"), "#!/bin/sh\nshift\nexec \"$@\"\n", 0o755)
 write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nterminal_command = ["{FAKE}/faketerm", "-e"]\n')
@@ -387,8 +411,59 @@ run("disc-launcher", "run", "stop-listen", "vinyl:Device", check=False)
 got = wait_for(lambda: open(os.path.join(ROOT, "vinyl-listen")).read().strip() == "stopped" and (vinyl_drive() or {}).get("offer", {}).get("actions") == ["listen", "encode"])
 check(bool(got), "vinyle : écoute arrêtée (entrée fermée)")
 run("disc-launcher", "run", "encode", "vinyl:Device", check=False)
-got = wait_for(lambda: os.path.exists(os.path.join(ROOT, "vinyl-record")) and open(os.path.join(ROOT, "vinyl-record")).read().strip() == "record --device Device")
-check(bool(got), "vinyle : encodage par vinylrip record dans un terminal")
+got = wait_for(lambda: (vinyl_drive() or {}).get("offer", {}).get("actions") == ["vs:start", "vs:cancel"])
+check(bool(got), "vinyle : encodage piloté sans terminal (vinylrip --json session) : « Démarrer la face A »")
+run("disc-launcher", "run", "vs:cancel", "vinyl:Device", check=False)
+got = wait_for(lambda: (vinyl_drive() or {}).get("offer", {}).get("actions") == ["listen", "encode"])
+check(bool(got), "vinyle : session annulée → platine de nouveau prête")
+
+# Extension Kodi simulée : connexion par la socket de contrôle, état reçu,
+# actions renvoyées, surcharges (écoute par Kodi, session, explication d'échec).
+import socket, threading
+ks = socket.socket(socket.AF_UNIX)
+ks.connect(os.path.join(RUN, "disc-launcher", "control.sock"))
+ks.sendall(b'{"cmd":"attach-ui","ui":"kodi"}\n{"type":"hello","kodi":"21.1","addon":"0.1.0"}\n')
+kmsgs = []
+def kread():
+    f = ks.makefile("r", encoding="utf-8")
+    for line in f:
+        kmsgs.append(json.loads(line))
+threading.Thread(target=kread, daemon=True).start()
+def ksend(dev, key):
+    ks.sendall((json.dumps({"type": "action", "id": dev, "key": key}) + "\n").encode())
+def klast(kind, pred=lambda m: True):
+    return wait_for(lambda: next((m for m in reversed(kmsgs) if m.get("type") == kind and pred(m)), None))
+def kvinyl(m):
+    return any(i.get("id") == "vinyl:Device" for i in m.get("items", []))
+st = klast("state", kvinyl)
+item = next(i for i in st["items"] if i["id"] == "vinyl:Device") if st else {}
+check([a[0] for a in item.get("actions", [])] == ["listen", "encode"], "Kodi : état de la fenêtre reçu par l'extension")
+ksend("vinyl:Device", "listen")
+pl = klast("play", lambda m: m.get("stop_key") == "stop-listen")
+check(pl is not None and pl["file"].endswith("/vinyl.wav") and open(os.path.join(ROOT, "vinyl-listen")).read() == "listening-http", "Kodi : écoute du vinyle par la sortie audio de Kodi (flux HTTP)")
+ksend("vinyl:Device", "stop-listen")
+check(klast("stop", lambda m: m.get("match") == "/vinyl.wav") is not None and wait_for(lambda: open(os.path.join(ROOT, "vinyl-listen")).read() == "stopped"), "Kodi : arrêt de l'écoute → lecture Kodi arrêtée")
+ksend("vinyl:Device", "encode")
+def kactions(m):
+    it = next((i for i in m.get("items", []) if i.get("id") == "vinyl:Device"), {})
+    return [a[0] for a in it.get("actions", [])]
+check(klast("state", lambda m: kactions(m) == ["vs:start", "vs:cancel"]) is not None, "Kodi : session vinyle pilotée depuis Kodi")
+ksend("vinyl:Device", "vs:start")
+klast("state", lambda m: kactions(m) == ["vs:stop", "vs:listen", "vs:cancel"])
+ksend("vinyl:Device", "vs:listen")
+check(klast("play", lambda m: m.get("stop_key") == "vs:unlisten") is not None, "Kodi : écoute pendant l'enregistrement, par Kodi")
+ksend("vinyl:Device", "vs:stop")
+klast("state", lambda m: kactions(m) == ["vs:start", "vs:finish", "vs:cancel"])
+ksend("vinyl:Device", "vs:finish")
+txt = klast("text")
+check(txt is not None and "vinylrip process /j" in txt["text"], "Kodi : explication d'échec de vinylrip affichée en entier")
+check(klast("state", lambda m: kactions(m) == ["vs:details", "vs:close"]) is not None, "Kodi : « Voir les explications » et « Fermer » après l'échec")
+ksend("vinyl:Device", "vs:close")
+klast("state", lambda m: kactions(m) == ["listen", "encode"])
+ks.close()
+time.sleep(0.5)
+doc = run("disc-launcher", "doctor", check=False).stdout
+check("Kodi" in doc, "doctor : ligne Kodi")
 write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n")
 check(wait_for(lambda: vinyl_drive() is None) is not None, "vinyle : platine débranchée → retirée")
 d.send_signal(signal.SIGTERM)
