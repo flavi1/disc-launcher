@@ -31,21 +31,24 @@ sudo apt install ./disc-launcher_dev_amd64.deb
 # Arch, Manjaro
 wget https://github.com/flavi1/disc-launcher/releases/download/dev/disc-launcher-dev-x86_64.pkg.tar.zst
 sudo pacman -U disc-launcher-dev-x86_64.pkg.tar.zst
+
+# Extension Kodi (facultative) : dans Kodi, Extensions › Installer depuis un fichier zip
+wget https://github.com/flavi1/disc-launcher/releases/download/dev/service.disc-launcher_dev.zip
 ```
 
 Pour mettre à jour, refaites les mêmes commandes : chaque construction porte un numéro croissant (Debian `0.5.0+git<date><heure>.g<commit>`, Arch `0.5.0.<date><heure>`), qu'`apt` et `pacman` voient comme une mise à jour. Utilisez `apt install ./…deb` plutôt que `dpkg -i` : apt installe aussi les dépendances.
 
-**Versions stables** : chaque étiquette `vX.Y.Z` publie sur la page [Releases](https://github.com/flavi1/disc-launcher/releases) `disc-launcher_X.Y.Z_amd64.deb`, `disc-launcher-X.Y.Z-1-x86_64.pkg.tar.zst`, ainsi que `PKGBUILD`, `disc-launcher.install` et `SRCINFO` pour une construction depuis les sources (`makepkg -si`) ou l'AUR.
+**Versions stables** : chaque étiquette `vX.Y.Z` publie sur la page [Releases](https://github.com/flavi1/disc-launcher/releases) `disc-launcher_X.Y.Z_amd64.deb`, `disc-launcher-X.Y.Z-1-x86_64.pkg.tar.zst`, l'extension Kodi `service.disc-launcher-<version>.zip`, ainsi que `PKGBUILD`, `disc-launcher.install` et `SRCINFO` pour une construction depuis les sources (`makepkg -si`) ou l'AUR.
 
 Les paquets installent tout ce que fait `sudo make install` (préfixe `/usr`), créent le groupe `disc-launcher` et marquent `/etc/disc-launcher/*.toml` comme configuration à conserver ; la configuration personnelle (`~/.config/disc-launcher/`) n'est jamais touchée. Les outils de dump, Kodi, RetroArch… restent facultatifs (dépendances recommandées ou optionnelles, voir [docs/dependances.md](docs/dependances.md)). Ensuite : `sudo usermod -aG disc-launcher $USER`, puis reconnectez-vous ; le démon démarre avec la session. Si disc-launcher avait été installé par `sudo make install`, retirez-le d'abord (`sudo make uninstall` dans le dossier source : la configuration est conservée), sinon les exécutables de `/usr/local/bin` resteraient prioritaires.
 
 **Pour les mainteneurs.** Le flux GitHub Actions `Paquets` (`.github/workflows/paquets.yml`) :
 
-- à chaque push sur `main` : construit les deux paquets et remplace la pré-version `dev` ;
+- à chaque push sur `main` : construit les deux paquets et l'extension Kodi, et remplace la pré-version `dev` ;
 - à chaque étiquette `vX.Y.Z` (égale à la version de `Cargo.toml`) : publie la version stable, avec le `PKGBUILD` pour l'AUR (somme de contrôle de l'archive renseignée). Depuis github.com : *Releases › Draft a new release › Choose a tag › « v0.6.0 » › Create new tag on publish*, cible `main` ;
-- à chaque pull request : construit les paquets, téléchargeables dans les artefacts de l'exécution.
+- à chaque pull request : construit les paquets et l'extension, téléchargeables dans les artefacts de l'exécution.
 
-Le `.deb` est construit sur Ubuntu 22.04 (glibc 2.35) par `packaging/debian/build-deb.sh` (`make install DESTDIR=…` puis `dpkg-deb`, sans debhelper) ; le paquet Arch par `makepkg` avec `packaging/arch/PKGBUILD`, dans un conteneur Arch. Le flux `Tests` (`.github/workflows/ci.yml`) lance les tests unitaires et de bout en bout à chaque push et pull request.
+Le `.deb` est construit sur Ubuntu 22.04 (glibc 2.35) par `packaging/debian/build-deb.sh` (`make install DESTDIR=…` puis `dpkg-deb`, sans debhelper) ; le paquet Arch par `makepkg` avec `packaging/arch/PKGBUILD`, dans un conteneur Arch ; l'extension Kodi par `packaging/kodi/build-zip.sh`, qui récupère la branche `main` de [kodi-disc-launcher](https://github.com/flavi1/kodi-disc-launcher) (`KODI_ADDON_REF` pour une autre branche ou étiquette), lance ses tests et produit l'archive. Une modification de l'extension seule n'est publiée qu'au push suivant sur `main` de disc-launcher. Le flux `Tests` (`.github/workflows/ci.yml`) lance les tests unitaires et de bout en bout à chaque push et pull request.
 
 ## Compilation et installation
 
@@ -231,7 +234,7 @@ Catégorie d'autorun : `vinyl` (`play` y vaut « Écouter »). Si PipeWire ou Pu
 
 ## Kodi
 
-L'extension Kodi **`service.disc-launcher`** ([kodi-disc-launcher](https://github.com/flavi1/kodi-disc-launcher)) fait de Kodi l'interface de disc-launcher. Elle remplace les extensions `script.disc.import` et vinylrip-kodi. Dès que Kodi tourne avec l'extension, en fenêtre comme en plein écran :
+L'extension Kodi **`service.disc-launcher`** ([kodi-disc-launcher](https://github.com/flavi1/kodi-disc-launcher)) fait de Kodi l'interface de disc-launcher. Son archive est publiée avec les paquets (pré-version `dev` et versions stables, voir [Installation par paquet](#installation-par-paquet)) ; dans Kodi : *Extensions › Installer depuis un fichier zip*. Elle remplace les extensions `script.disc.import` et vinylrip-kodi. Dès que Kodi tourne avec l'extension, en fenêtre comme en plein écran :
 
 - les propositions (disques, cartouches, volumes, platine) s'affichent dans Kodi au lieu de la fenêtre « Disques et périphériques » ; les tâches en cours y ont leur barre de progression ;
 - les notifications passent par Kodi ;
