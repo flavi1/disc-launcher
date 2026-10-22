@@ -112,12 +112,15 @@ pub fn start_listen_http(t: &Turntable, log: &Path, on_url: impl FnOnce(String) 
         let _ = std::fs::create_dir_all(d);
     }
     let err = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
+    let mut copy = err.try_clone()?;
     let mut child = Command::new("vinylrip").args(["--json", "listen", "--http", "--device", &t.wanted]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(err).spawn()?;
     let out = child.stdout.take().ok_or_else(|| io::Error::other("stdout"))?;
     std::thread::spawn(move || {
-        use std::io::BufRead;
+        use std::io::{BufRead, Write};
         let mut on_url = Some(on_url);
         for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+            // Événements aussi dans le journal : l'erreur éventuelle y est relue.
+            let _ = writeln!(copy, "{line}");
             if let Ok(v) = crate::json::parse(line.trim()) {
                 if let Some(u) = v["url"].as_str() {
                     if let Some(f) = on_url.take() {
@@ -128,6 +131,24 @@ pub fn start_listen_http(t: &Turntable, log: &Path, on_url: impl FnOnce(String) 
         }
     });
     Ok(child)
+}
+
+/// Cause d'un arrêt de l'écoute : dernier événement `error` de vinylrip
+/// (message et conseil) dans le journal, sinon sa dernière ligne.
+pub fn listen_failure(log: &Path) -> String {
+    let text = crate::task::tail(log, 8192);
+    for line in text.lines().rev() {
+        if let Ok(v) = crate::json::parse(line.trim()) {
+            if v["event"].as_str() == Some("error") {
+                let m = v["message"].str_or("");
+                return match v["hint"].as_str() {
+                    Some(h) if !h.is_empty() => format!("{m}\n{h}"),
+                    _ => m.to_string(),
+                };
+            }
+        }
+    }
+    text.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("vinylrip listen s'est arrêté").to_string()
 }
 
 /// Arrête l'écoute : fermeture de l'entrée (vinylrip coupe arecord et aplay),
@@ -167,5 +188,11 @@ mod tests {
         assert_eq!(find("codec", &cards, usb).unwrap().index, 1);
         assert_eq!(find("Behringer", &cards, usb), None);
         assert_eq!(record_argv(&find("Device", &cards, usb).unwrap()), ["vinylrip", "record", "--device", "Device"]);
+        let log = std::env::temp_dir().join(format!("dl-listen-{}.log", std::process::id()));
+        std::fs::write(&log, "bruit\n{\"event\":\"error\",\"message\":\"écoute interrompue : arecord s'est arrêté (code 1) : Device or resource busy\",\"hint\":\"carte occupée\"}\n").unwrap();
+        assert_eq!(listen_failure(&log), "écoute interrompue : arecord s'est arrêté (code 1) : Device or resource busy\ncarte occupée");
+        std::fs::write(&log, "arecord: erreur\n").unwrap();
+        assert_eq!(listen_failure(&log), "arecord: erreur");
+        let _ = std::fs::remove_file(log);
     }
 }

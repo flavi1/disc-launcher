@@ -114,6 +114,7 @@ enabled = false
 # dump (média : encodage par encbd), open (gestionnaire de fichiers), ou une clé
 # d'action (play-disc, custom:copie…).
 order = ["play", "dump-then-play"]
+# La platine vinyle (vinyl) ignore ce réglage global : seulement [autorun.vinyl].
 # Par catégorie (console, cart, media, data, usb, vinyl) ou par gestionnaire (psx,
 # cdda, dvd-video…), du plus précis au plus général :
 # [autorun.media]

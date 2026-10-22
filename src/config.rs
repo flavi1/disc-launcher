@@ -290,7 +290,10 @@ impl Config {
     /// ```
     pub fn autorun_for(&self, id: &str, category: &str) -> Option<Vec<String>> {
         let a = self.raw.get("autorun");
-        let layers = [a.get(id), a.get(category), a];
+        // Platine vinyle : jamais d'écoute ou d'encodage lancés par le réglage
+        // global ; seulement si [autorun.vinyl] (ou [autorun.<platine>]) le demande.
+        let global = if category == "vinyl" { &Value::Null } else { a };
+        let layers = [a.get(id), a.get(category), global];
         let enabled = layers
             .iter()
             .find_map(|l| match l {

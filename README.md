@@ -230,7 +230,7 @@ Si [vinylrip](https://github.com/flavi1/vinylrip) est installé et que sa config
 - **Écouter** : `vinylrip listen` (arecord vers aplay), jusqu'à **Arrêter l'écoute**. Sous Kodi, le son passe par la sortie audio de Kodi (flux local `vinylrip listen --http`).
 - **Encoder (vinylrip)** : disc-launcher pilote `vinylrip --json session`, sans terminal. La platine affiche pas à pas **Démarrer la face A**, **Arrêter la face A**, **Écouter**, **Démarrer la face B**, **Terminer et traiter**, puis l'étape en cours (découpage, identification, encodage et vérification…) et, si plusieurs éditions sont possibles, la liste où choisir. En cas d'échec, l'explication de vinylrip (ce qui est conservé et où, la commande de reprise, l'import dans Audacity) s'ouvre en entier dans une fenêtre de texte ; elle reste accessible par **Voir les explications**. Indisponible pendant l'écoute.
 
-Catégorie d'autorun : `vinyl` (`play` y vaut « Écouter »). Si PipeWire ou PulseAudio tient la carte, l'accès direct d'arecord échoue : c'est une limite connue de vinylrip.
+Catégorie d'autorun : `vinyl` (`play` y vaut « Écouter »). L'autorun global (`[autorun] enabled = true`) ne s'applique pas à la platine : brancher ou allumer la platine ne lance rien, sauf avec `[autorun.vinyl] enabled = true`. Si l'écoute s'arrête d'elle-même (carte occupée, arecord ou aplay en échec), une notification le dit et « Écouter » revient. Si PipeWire ou PulseAudio tient la carte, l'accès direct d'arecord échoue : c'est une limite connue de vinylrip.
 
 ## Kodi
 

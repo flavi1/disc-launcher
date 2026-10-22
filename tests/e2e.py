@@ -356,10 +356,13 @@ cards = os.path.join(ROOT, "asound-cards")
 write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n 1 [Device         ]: USB-Audio - USB Audio CODEC\n")
 write(os.path.join(HOME, ".config/vinylrip/config.toml"), 'device = "Device"\n')
 write(os.path.join(FAKE, "vinylrip"), f"""#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 a = sys.argv[1:]
 def out(e):
     print(json.dumps(e), flush=True)
+if "listen" in a and os.path.exists("{ROOT}/vinyl-busy"):
+    out({{"event": "error", "message": "écoute interrompue : arecord s'est arrêté (code 1) : Device or resource busy", "hint": "carte occupée"}})
+    sys.exit(3)
 if "listen" in a:
     open("{ROOT}/vinyl-listen", "w").write("listening-http" if "--http" in a else "listening")
     if "--http" in a:
@@ -418,6 +421,12 @@ check(bool(got), "vinyle : écoute lancée (vinylrip listen) ; encodage indispon
 run("disc-launcher", "run", "stop-listen", "vinyl:Device", check=False)
 got = wait_for(lambda: open(os.path.join(ROOT, "vinyl-listen")).read().strip() == "stopped" and (vinyl_drive() or {}).get("offer", {}).get("actions") == ["listen", "encode"])
 check(bool(got), "vinyle : écoute arrêtée (entrée fermée)")
+open(os.path.join(ROOT, "vinyl-busy"), "w").close()
+run("disc-launcher", "run", "listen", "vinyl:Device", check=False)
+time.sleep(1)
+got = wait_for(lambda: (vinyl_drive() or {}).get("offer", {}).get("actions") == ["listen", "encode"])
+check(bool(got), "vinyle : écoute qui échoue (carte occupée) → « Écouter » revient")
+os.remove(os.path.join(ROOT, "vinyl-busy"))
 run("disc-launcher", "run", "encode", "vinyl:Device", check=False)
 got = wait_for(lambda: (vinyl_drive() or {}).get("offer", {}).get("actions") == ["vs:start", "vs:cancel"])
 check(bool(got), "vinyle : encodage piloté sans terminal (vinylrip --json session) : « Démarrer la face A »")

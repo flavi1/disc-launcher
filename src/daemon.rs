@@ -1865,11 +1865,20 @@ impl Daemon {
 
     /// État de la platine à jour (fin d'écoute ou d'encodage).
     fn refresh_vinyl(&mut self) {
-        if let Some((_, c)) = self.listening.as_mut() {
-            if c.try_wait().ok().flatten().is_some() {
-                dl_log!(info, "vinyl", "écoute terminée");
+        let mut failed = None;
+        if let Some((dev, c)) = self.listening.as_mut() {
+            if let Some(st) = c.try_wait().ok().flatten() {
+                dl_log!(info, "vinyl", "écoute terminée", "code" => format!("{:?}", st.code()));
+                // Arrêt de lui-même (carte occupée…) : le dire, « Écouter » revient.
+                if !st.success() {
+                    failed = Some((dev.clone(), crate::vinyl::listen_failure(&paths::log_dir().join("vinylrip-listen.log"))));
+                }
                 self.listening = None;
             }
+        }
+        if let Some((dev, why)) = failed {
+            self.kodi_send(jobj! {"type" => "stop", "match" => "/vinyl.wav"});
+            self.error_notif(&dev, &why);
         }
         if self.encoding.as_ref().is_some_and(|(_, pid)| !sys::pid_alive(*pid as i32)) {
             dl_log!(info, "vinyl", "terminal d'encodage fermé");
@@ -3179,6 +3188,10 @@ mod autorun_tests {
         let c = cfg("[autorun]\nenabled = true\n[autorun.cdda]\norder = [\"play\"]\n[autorun.usb]\nenabled = false\n");
         assert_eq!(c.autorun_for("psx", "console").unwrap(), ["play", "dump-then-play"]);
         assert_eq!(c.autorun_for("cdda", "media").unwrap(), ["play"]);
+        // La platine ignore l'autorun global : l'écoute se lance à la main.
+        assert_eq!(c.autorun_for("vinyl", "vinyl"), None);
+        let v = cfg("[autorun]\nenabled = true\n[autorun.vinyl]\nenabled = true\norder = [\"play\"]\n");
+        assert_eq!(v.autorun_for("vinyl", "vinyl").unwrap(), ["play"]);
         assert_eq!(c.autorun_for("usb", "usb"), None);
         let c = cfg("[autorun]\npsx = true\n[autorun.media]\nenabled = true\norder = [\"play\"]\n");
         assert!(c.autorun_for("psx", "console").is_some());
