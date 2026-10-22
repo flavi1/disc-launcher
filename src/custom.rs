@@ -74,6 +74,20 @@ pub fn extend(cfg: &Config, handler: &str, actions: &mut Vec<(String, String)>) 
     }
 }
 
+/// Vrai si l'action personnalisée `key` lance le programme `prog` (ex. une
+/// ancienne action « Ripper le CD » appelant encbd, désormais intégré).
+pub fn calls(cfg: &Config, key: &str, prog: &str) -> bool {
+    let Some(a) = get(cfg, key) else { return false };
+    let words: Vec<String> = match &a.command {
+        Value::Str(s) => s.split(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == '"' || c == '\'').map(|w| w.to_string()).collect(),
+        _ => a.command.strings(),
+    };
+    words.iter().any(|w| {
+        let base = w.rsplit('/').next().unwrap_or(w);
+        base == prog || base == format!("{prog}.appimage") || base == format!("{prog}.sh")
+    })
+}
+
 /// Contexte d'exécution.
 pub struct Ctx<'a> {
     pub handler: &'a str,
@@ -161,6 +175,8 @@ mod tests {
         assert_eq!(actions_for(&cfg, "psx").len(), 1);
         let a = get(&cfg, "custom:rip-cd").unwrap();
         assert!(a.terminal);
+        assert!(calls(&cfg, "custom:rip-cd", "encbd"));
+        assert!(!calls(&cfg, "custom:copie", "encbd"));
         let ctx = Ctx { handler: "cdda", device: Some("/dev/sr0"), ident: None, tag: None, resolution: None, existing: None, label: Some("ALBUM") };
         let v = argv(&cfg, &a, &ctx).unwrap();
         assert_eq!(v[0], "env");

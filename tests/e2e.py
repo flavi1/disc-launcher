@@ -386,7 +386,15 @@ elif "session" in a:
             out({{"event": "cancelled", "deleted": False, "kept": "/j"}}); break
 """, 0o755)
 write(os.path.join(FAKE, "faketerm"), "#!/bin/sh\nshift\nexec \"$@\"\n", 0o755)
-write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nterminal_command = ["{FAKE}/faketerm", "-e"]\n')
+panel_log = os.path.join(ROOT, "panel2-states")
+write(os.path.join(FAKE, "fake-panel2"), f"""#!/usr/bin/env python3
+import sys
+print("ready", flush=True)
+with open({panel_log!r}, "a") as log:
+    for line in sys.stdin:
+        log.write(line); log.flush()
+""", 0o755)
+write(os.path.join(HOME, ".config/disc-launcher/config.toml"), f'[general]\nterminal_command = ["{FAKE}/faketerm", "-e"]\n[ui]\npanel_command = ["{FAKE}/fake-panel2"]\n')
 d = subprocess.Popen([os.path.join(BIN, "disc-launcherd"), "--foreground"], env=dict(ENV, DISC_LAUNCHER_ASOUND_CARDS=cards), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 def vinyl_drive():
     try:
@@ -466,6 +474,13 @@ doc = run("disc-launcher", "doctor", check=False).stdout
 check("Kodi" in doc, "doctor : ligne Kodi")
 write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n")
 check(wait_for(lambda: vinyl_drive() is None) is not None, "vinyle : platine débranchée → retirée")
+# Kodi fermé : la fenêtre du bureau revient (et non les notifications).
+open(panel_log, "w").close()
+write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n 1 [Device         ]: USB-Audio - USB Audio CODEC\n")
+got = wait_for(lambda: any('"visible":true' in l and "vinyl:Device" in l for l in open(panel_log)))
+check(bool(got), "Kodi fermé : la fenêtre « Disques et périphériques » reprend la main")
+write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n")
+wait_for(lambda: vinyl_drive() is None)
 d.send_signal(signal.SIGTERM)
 d.wait(timeout=10)
 os.remove(os.path.join(HOME, ".config/disc-launcher/config.toml"))

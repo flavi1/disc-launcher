@@ -155,6 +155,9 @@ pub struct Daemon {
     /// Ramener la fenêtre au premier plan au prochain envoi.
     panel_raise: bool,
     panel_starts: u32,
+    /// Fenêtre GTK fermée volontairement (Kodi a pris le relais) : sa sortie
+    /// n'est pas une panne de GTK.
+    panel_dropped: bool,
     /// Écoute de la platine en cours : (périphérique, processus vinylrip listen).
     listening: Option<(String, std::process::Child)>,
     /// Encodage vinylrip en cours dans un terminal : (périphérique, PID du terminal).
@@ -295,6 +298,7 @@ pub fn run(foreground: bool) -> i32 {
         panel_visible: false,
         panel_raise: false,
         panel_starts: 0,
+        panel_dropped: false,
         listening: None,
         encoding: None,
         kodi: None,
@@ -1035,6 +1039,12 @@ impl Daemon {
         if !dev.starts_with("/dev/") {
             return;
         }
+        // Une action personnalisée qui appelle encbd ferait doublon : l'action intégrée la remplace.
+        let dup: Vec<String> = offer.actions.iter().map(|(k, _)| k.clone()).filter(|k| crate::custom::calls(&self.cfg, k, "encbd")).collect();
+        if !dup.is_empty() {
+            dl_log!(info, "encbd", "action personnalisée remplacée par l'encodage intégré", "actions" => dup.join(","));
+            offer.actions.retain(|(k, _)| !dup.contains(k));
+        }
         let at = offer.actions.iter().position(|(k, _)| k == "open-files" || k == "eject").unwrap_or(offer.actions.len());
         offer.actions.insert(at, (crate::encbd::ACTION.into(), t("encode-disc").into()));
         offer.describe.set("encbd_pending", true);
@@ -1212,6 +1222,10 @@ impl Daemon {
                 dl_log!(info, "panel", "action choisie", "drive" => id, "action" => key);
                 self.ui_action(&id, &key);
             }
+            PanelEvent::Exited(_) if self.panel_dropped => {
+                self.panel_dropped = false;
+                self.panel_ready = false;
+            }
             PanelEvent::Exited(_) => {
                 let code = self.panel.as_mut().and_then(|p| {
                     for _ in 0..20 {
@@ -1310,8 +1324,10 @@ impl Daemon {
         if !crate::kodi::enabled(&self.cfg) {
             return;
         }
-        // La fenêtre GTK cède la place à Kodi.
-        self.panel = None;
+        // La fenêtre GTK cède la place à Kodi (elle revient à sa fermeture).
+        if self.panel.take().is_some() {
+            self.panel_dropped = true;
+        }
         self.panel_ready = false;
         // Kodi démarré pour lire un disque : le lire.
         if let Some((at, m)) = self.kodi_pending.take() {
