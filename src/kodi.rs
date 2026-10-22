@@ -21,7 +21,7 @@
 //! - `finished` : `{title, kind, path, folder}` (menu Lire / Ouvrir / Fermer).
 //!
 //! Kodi → démon : `hello {kodi, addon}`, `action {id, key}`, `hidden`,
-//! `done {req}`.
+//! `show` (comme un clic sur l'icône de la zone de notification), `done {req}`.
 //!
 //! ```toml
 //! [kodi]
@@ -144,6 +144,8 @@ pub enum Msg {
     Hello(Value),
     Action(String, String),
     Hidden,
+    /// Afficher la fenêtre (entrée « Disques et périphériques » de Kodi).
+    Show,
     Done(u64),
     /// Connexion fermée (Kodi arrêté).
     Gone,
@@ -155,6 +157,7 @@ pub fn parse(line: &str) -> Option<Msg> {
         "hello" => Some(Msg::Hello(v)),
         "action" => Some(Msg::Action(v["id"].as_str()?.to_string(), v["key"].as_str()?.to_string())),
         "hidden" => Some(Msg::Hidden),
+        "show" => Some(Msg::Show),
         "done" => Some(Msg::Done(v["req"].i64_or(-1).max(0) as u64)),
         _ => None,
     }

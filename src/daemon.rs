@@ -1335,6 +1335,7 @@ impl Daemon {
                 self.ui_action(&dev, &key);
             }
             Msg::Hidden => self.hide_all(),
+            Msg::Show => self.show_all(),
             Msg::Done(req) => {
                 if let Some(w) = self.kodi_waits.remove(&req) {
                     let _ = w.send(());
