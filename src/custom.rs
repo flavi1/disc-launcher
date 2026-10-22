@@ -7,7 +7,12 @@
 //! handlers = ["cdda"]                 # gestionnaires concernés ; "*" = tous
 //! command = "encbd \"$DL_DEVICE\" ~/Musique"
 //! terminal = true                     # suivre la commande dans un terminal
+//! replaces = "encode-disc"            # facultatif : remplace cette action par défaut
 //! ```
+//!
+//! Une action personnalisée s'ajoute aux actions par défaut ; avec `replaces`
+//! (une clé ou une liste de clés : `play-disc`, `encode-disc`, `open-files`…),
+//! elle prend la place de celles-ci, à leur position.
 //!
 //! `command` est soit une chaîne, exécutée par `sh -c` avec les variables
 //! `DL_*` (comme pour un gestionnaire), soit une liste d'arguments avec les
@@ -31,6 +36,8 @@ pub struct Action {
     pub handlers: Vec<String>,
     pub command: Value,
     pub terminal: bool,
+    /// Actions par défaut remplacées par celle-ci.
+    pub replaces: Vec<String>,
 }
 
 pub fn all(cfg: &Config) -> Vec<Action> {
@@ -44,7 +51,11 @@ pub fn all(cfg: &Config) -> Vec<Action> {
                 Some(s) => vec![s.to_string()],
                 None => a["handlers"].strings(),
             };
-            out.push(Action { name: name.clone(), label: a["label"].str_or(name).to_string(), handlers, command: a["command"].clone(), terminal: a["terminal"].bool_or(false) });
+            let replaces = match a["replaces"].as_str() {
+                Some(s) => vec![s.to_string()],
+                None => a["replaces"].strings(),
+            };
+            out.push(Action { name: name.clone(), label: a["label"].str_or(name).to_string(), handlers, command: a["command"].clone(), terminal: a["terminal"].bool_or(false), replaces });
         }
     }
     out
@@ -60,17 +71,27 @@ pub fn actions_for(cfg: &Config, handler: &str) -> Vec<(String, String)> {
     all(cfg).into_iter().filter(|a| a.handlers.iter().any(|h| h == "*" || h == handler)).map(|a| (format!("{PREFIX}{}", a.name), a.label)).collect()
 }
 
-/// Ajoute les actions personnalisées à une liste, avant « Éjecter ».
+fn applies(a: &Action, handler: &str) -> bool {
+    a.handlers.iter().any(|h| h == "*" || h == handler)
+}
+
+/// Actions par défaut remplacées (`replaces`) pour ce gestionnaire.
+pub fn replaced(cfg: &Config, handler: &str) -> Vec<String> {
+    all(cfg).into_iter().filter(|a| applies(a, handler)).flat_map(|a| a.replaces).collect()
+}
+
+/// Ajoute les actions personnalisées à une liste : à la place des actions
+/// qu'elles remplacent, sinon avant « Éjecter ».
 pub fn extend(cfg: &Config, handler: &str, actions: &mut Vec<(String, String)>) {
-    let extra = actions_for(cfg, handler);
-    if extra.is_empty() {
-        return;
-    }
-    let at = actions.iter().position(|(k, _)| k == "eject").unwrap_or(actions.len());
-    for (i, a) in extra.into_iter().enumerate() {
-        if !actions.iter().any(|(k, _)| *k == a.0) {
-            actions.insert(at + i, a);
+    for a in all(cfg).into_iter().filter(|a| applies(a, handler)) {
+        let key = format!("{PREFIX}{}", a.name);
+        if actions.iter().any(|(k, _)| *k == key) {
+            continue;
         }
+        let pos = actions.iter().position(|(k, _)| a.replaces.contains(k));
+        actions.retain(|(k, _)| !a.replaces.contains(k));
+        let at = pos.unwrap_or_else(|| actions.iter().position(|(k, _)| k == "eject").unwrap_or(actions.len()));
+        actions.insert(at.min(actions.len()), (key, a.label.clone()));
     }
 }
 
@@ -176,6 +197,13 @@ mod tests {
         let a = get(&cfg, "custom:rip-cd").unwrap();
         assert!(a.terminal);
         assert!(calls(&cfg, "custom:rip-cd", "encbd"));
+        // `replaces` : l'action personnalisée prend la place de l'action par défaut.
+        let cfg2 = Config { errors: vec![], raw: crate::toml::parse("[actions.lire]\nlabel = \"Lire avec mpv\"\nhandlers = [\"cdda\"]\ncommand = [\"mpv\", \"cdda://\"]\nreplaces = \"play-disc\"\n").unwrap() };
+        let mut acts = vec![("play-disc".to_string(), "Lire".to_string()), ("eject".to_string(), "Éjecter".to_string())];
+        extend(&cfg2, "cdda", &mut acts);
+        assert_eq!(acts.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["custom:lire", "eject"]);
+        assert_eq!(replaced(&cfg2, "cdda"), ["play-disc"]);
+        assert!(replaced(&cfg2, "dvd-video").is_empty());
         assert!(!calls(&cfg, "custom:copie", "encbd"));
         let ctx = Ctx { handler: "cdda", device: Some("/dev/sr0"), ident: None, tag: None, resolution: None, existing: None, label: Some("ALBUM") };
         let v = argv(&cfg, &a, &ctx).unwrap();

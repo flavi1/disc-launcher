@@ -1039,14 +1039,11 @@ impl Daemon {
         if !dev.starts_with("/dev/") {
             return;
         }
-        // Une action personnalisée qui appelle encbd ferait doublon : l'action intégrée la remplace.
-        let dup: Vec<String> = offer.actions.iter().map(|(k, _)| k.clone()).filter(|k| crate::custom::calls(&self.cfg, k, "encbd")).collect();
-        if !dup.is_empty() {
-            dl_log!(info, "encbd", "action personnalisée remplacée par l'encodage intégré", "actions" => dup.join(","));
-            offer.actions.retain(|(k, _)| !dup.contains(k));
+        // Une action personnalisée peut remplacer l'encodage intégré (`replaces = "encode-disc"`).
+        if crate::custom::replaced(&self.cfg, &offer.handler).iter().all(|k| k != crate::encbd::ACTION) {
+            let at = offer.actions.iter().position(|(k, _)| k == "open-files" || k == "eject").unwrap_or(offer.actions.len());
+            offer.actions.insert(at, (crate::encbd::ACTION.into(), t("encode-disc").into()));
         }
-        let at = offer.actions.iter().position(|(k, _)| k == "open-files" || k == "eject").unwrap_or(offer.actions.len());
-        offer.actions.insert(at, (crate::encbd::ACTION.into(), t("encode-disc").into()));
         offer.describe.set("encbd_pending", true);
         let dest = crate::encbd::dest_dir(&self.cfg, kind);
         let fp = self.drives.get(dev).and_then(|d| d.ident.as_ref()).map(|i| i.fingerprint.clone()).unwrap_or_default();
@@ -2566,7 +2563,9 @@ pub fn offer_icons(o: &Offer, ident: Option<&IdentResult>) -> Vec<String> {
     let mut v: Vec<&str> = vec![];
     let cart = ident.is_some_and(|i| i.physical.media == crate::device::MediaKind::Cart);
     if cart {
-        // Types MIME des ROM (fournis par la plupart des thèmes).
+        // Icône de cartouche d'abord : les icônes de type MIME des ROM des thèmes
+        // (Breeze…) sont des icônes de document (feuille), pas une cartouche.
+        v.push("disc-launcher-fallback-cartridge");
         v.extend(match o.handler.as_str() {
             "n64" => &["application-x-n64-rom"][..],
             "snes" => &["application-x-snes-rom"][..],
@@ -2578,7 +2577,7 @@ pub fn offer_icons(o: &Offer, ident: Option<&IdentResult>) -> Vec<String> {
             "gamegear" => &["application-x-gamegear-rom"][..],
             _ => &[][..],
         });
-        v.extend(["disc-launcher-fallback-cartridge", "input-gaming", "media-flash"]);
+        v.extend(["input-gaming", "media-flash"]);
     } else {
         match o.handler.as_str() {
             "usb" if o.describe["sd"].bool_or(false) => v.extend(["media-flash-sd-mmc", "media-flash", "drive-removable-media"]),

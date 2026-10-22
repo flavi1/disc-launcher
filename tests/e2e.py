@@ -468,6 +468,7 @@ check(txt is not None and "vinylrip process /j" in txt["text"], "Kodi : explicat
 check(klast("state", lambda m: kactions(m) == ["vs:details", "vs:close"]) is not None, "Kodi : « Voir les explications » et « Fermer » après l'échec")
 ksend("vinyl:Device", "vs:close")
 klast("state", lambda m: kactions(m) == ["listen", "encode"])
+ks.shutdown(socket.SHUT_RDWR)
 ks.close()
 time.sleep(0.5)
 doc = run("disc-launcher", "doctor", check=False).stdout
@@ -477,8 +478,11 @@ check(wait_for(lambda: vinyl_drive() is None) is not None, "vinyle : platine dé
 # Kodi fermé : la fenêtre du bureau revient (et non les notifications).
 open(panel_log, "w").close()
 write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n 1 [Device         ]: USB-Audio - USB Audio CODEC\n")
+wait_for(lambda: (vinyl_drive() or {}).get("offer"))
+run("disc-launcher", "run", "encode", "vinyl:Device", check=False)    # ouvre la fenêtre
 got = wait_for(lambda: any('"visible":true' in l and "vinyl:Device" in l for l in open(panel_log)))
 check(bool(got), "Kodi fermé : la fenêtre « Disques et périphériques » reprend la main")
+run("disc-launcher", "run", "vs:cancel", "vinyl:Device", check=False)
 write(cards, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n")
 wait_for(lambda: vinyl_drive() is None)
 d.send_signal(signal.SIGTERM)

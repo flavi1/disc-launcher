@@ -255,6 +255,8 @@ L'extension se connecte à la socket de contrôle du démon : aucun port réseau
 | `custom` (actions `terminal = true`) | dans un terminal | en arrière-plan, journal affiché en cas d'échec |
 | `notifications` | notifications du bureau | notifications de Kodi |
 
+Trois choses distinctes : les **actions par défaut** (celles de disc-launcher), les **actions personnalisées** (`[actions.*]`, qui s'ajoutent ou, avec `replaces`, remplacent une action par défaut), et les **surcharges Kodi** : elles n'ajoutent ni ne retirent aucune action, elles changent seulement la façon de l'exécuter quand Kodi est là. Pour une action personnalisée, la surcharge `custom` la fait tourner en arrière-plan au lieu d'un terminal.
+
 Tout se règle dans `config.toml`, sans panneau de réglages. Les surcharges sont actives par défaut ; on les désactive une à une :
 
 ```toml
@@ -338,6 +340,7 @@ terminal = true                                     # suivre la commande dans un
 - `command` en **liste** : arguments avec les gabarits `{device}`, `{mount}`, `{existing}`, `{label}`, `{name}`, `{handler}`, `{roms}` (et `~` en début d'argument), sans shell.
 - La commande est lancée détachée ; sa sortie va dans `~/.local/state/disc-launcher/log/action-<nom>.log`, ou s'affiche dans un terminal avec `terminal = true`.
 - Elle s'essaie sans la fenêtre : `disc-launcher run custom:copie /dev/sr0`.
+- Une action personnalisée **s'ajoute** aux actions par défaut. Pour qu'elle en **remplace** une, à sa place : `replaces = "play-disc"` (ou une liste : `replaces = ["play-disc", "encode-disc"]`). Ex. : une commande d'encodage à vous à la place de « Encoder (encbd) » ; `disc-launcher doctor` signale une action personnalisée qui lance encbd sans `replaces`, en doublon.
 - Pour encoder un CD audio, un DVD ou un Blu-ray avec encbd, inutile d'ajouter une action : elle est intégrée (voir plus haut), avec le nom prévu et la détection des copies existantes. Une ancienne action `[actions.rip-cd]` appelant encbd peut être retirée.
 
 ## Gestionnaires

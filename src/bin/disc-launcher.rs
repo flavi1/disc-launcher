@@ -404,6 +404,14 @@ fn doctor() {
         Some(c) => format!("{} (CD audio → {}, DVD/Blu-ray → {})", c.join(" "), disclauncher::encbd::dest_dir(&cfg, "music").display(), disclauncher::encbd::dest_dir(&cfg, "video").display()),
         None => "absent ou désactivé (encodage des CD audio, DVD et Blu-ray indisponible)".into(),
     });
+    if disclauncher::encbd::command(&cfg).is_some() {
+        for a in disclauncher::custom::all(&cfg) {
+            let key = format!("{}{}", disclauncher::custom::PREFIX, a.name);
+            if disclauncher::custom::calls(&cfg, &key, "encbd") && !a.replaces.iter().any(|r| r == disclauncher::encbd::ACTION) {
+                println!("                 ⚠ l'action [actions.{}] lance aussi encbd : doublon avec « Encoder (encbd) ». Retirez-la, ou ajoutez-y replaces = \"encode-disc\" pour qu'elle le remplace.", a.name);
+            }
+        }
+    }
     println!("pkexec         : {}", if paths::which("pkexec").is_some() { "oui" } else { "non" });
     {
         // Groupe dispensant du mot de passe pour les lectures privilégiées (règle polkit).
